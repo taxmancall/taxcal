@@ -97,7 +97,7 @@
       <h2>양도소득세 (개인, 부동산)</h2>
       <div class="field">
         <label>양도차익 (양도가액 − 취득가액 − 필요경비)</label>
-        <input type="number" id="t_gain" value="100000000" step="1000000">
+        <input type="text" inputmode="numeric" id="t_gain" value="100000000">
       </div>
       <div class="field">
         <label>보유기간</label>
@@ -126,7 +126,7 @@
       <h2>종합소득세</h2>
       <div class="field">
         <label>종합소득 과세표준 (소득금액 − 각종 소득공제 후)</label>
-        <input type="number" id="i_base" value="100000000" step="1000000">
+        <input type="text" inputmode="numeric" id="i_base" value="100000000">
       </div>
       <div class="note">"마진(이익) 1억"을 그대로 과세표준으로 가정한 값입니다. 실제로는 소득공제(인적공제·4대보험 등) 차감 후 금액이 과세표준이므로, 실제 신고 시엔 더 낮아질 수 있습니다.</div>
     </div>
@@ -139,7 +139,7 @@
       <h2>증여세</h2>
       <div class="field">
         <label>증여재산가액</label>
-        <input type="number" id="g_value" value="100000000" step="1000000">
+        <input type="text" inputmode="numeric" id="g_value" value="100000000">
       </div>
       <div class="field">
         <label>증여자와의 관계 (10년 합산 공제한도 자동 적용)</label>
@@ -163,16 +163,16 @@
       <h2>상속세</h2>
       <div class="field">
         <label>상속재산가액 (총 상속재산 − 공과금·장례비용 후, 사전증여재산 가산 전)</label>
-        <input type="number" id="h_value" value="100000000" step="1000000">
+        <input type="text" inputmode="numeric" id="h_value" value="100000000">
       </div>
       <div class="field">
         <label>채무 (임대보증금·대출 등)</label>
-        <input type="number" id="h_debt" value="0" step="1000000">
+        <input type="text" inputmode="numeric" id="h_debt" value="0">
       </div>
       <div class="checkline"><input type="checkbox" id="h_spouse" checked> 배우자 있음 (일괄공제 5억 + 배우자공제)</div>
       <div class="field" id="h_spousewrap">
         <label>배우자 상속공제액 (최소 5억 ~ 최대 30억, 실제 배우자 상속분 기준)</label>
-        <input type="number" id="h_spouseamt" value="500000000" step="10000000">
+        <input type="text" inputmode="numeric" id="h_spouseamt" value="500000000">
       </div>
       <div class="checkline"><input type="checkbox" id="h_report" checked> 신고기한 내 신고 (신고세액공제 3%)</div>
       <div class="note">일괄공제(2억 기초공제+인적공제 vs 5억 중 큰 금액, 통상 5억 선택)만 반영한 간이 계산입니다. 금융재산상속공제, 동거주택상속공제 등은 미반영.</div>
@@ -186,7 +186,7 @@
       <h2>취득세 (부동산)</h2>
       <div class="field">
         <label>취득가액</label>
-        <input type="number" id="a_value" value="500000000" step="1000000">
+        <input type="text" inputmode="numeric" id="a_value" value="500000000">
       </div>
       <div class="field">
         <label>취득 원인</label>
@@ -208,15 +208,15 @@
       <h2>부담부증여 (증여재산에 담보된 채무 인수 포함)</h2>
       <div class="field">
         <label>증여 대상 자산 시가(=취득세 과세표준)</label>
-        <input type="number" id="b_asset" value="1000000000" step="1000000">
+        <input type="text" inputmode="numeric" id="b_asset" value="1000000000">
       </div>
       <div class="field">
         <label>인수 채무액 (임대보증금 + 담보대출)</label>
-        <input type="number" id="b_debt" value="400000000" step="1000000">
+        <input type="text" inputmode="numeric" id="b_debt" value="400000000">
       </div>
       <div class="field">
         <label>당초 취득가액 (양도차익 계산용)</label>
-        <input type="number" id="b_acq" value="300000000" step="1000000">
+        <input type="text" inputmode="numeric" id="b_acq" value="300000000">
       </div>
       <div class="field">
         <label>증여자와의 관계</label>
@@ -245,6 +245,25 @@
 <script>
 const won = n => Math.round(n).toLocaleString('ko-KR') + '원';
 const wonUk = n => (n/100000000).toFixed(2).replace(/\.00$/,'') + '억원';
+
+// 콤마 입력 헬퍼: 숫자 입력칸에 천단위 콤마를 자동으로 표시
+function numVal(id){
+  const el = document.getElementById(id);
+  return Number((el.value||'0').replace(/[^0-9]/g,''))||0;
+}
+function attachComma(id, onChange){
+  const el = document.getElementById(id);
+  const format = () => {
+    const digits = el.value.replace(/[^0-9]/g,'');
+    const prevLen = el.value.length;
+    const cursorFromEnd = prevLen - el.selectionStart;
+    el.value = digits === '' ? '' : Number(digits).toLocaleString('ko-KR');
+    const newPos = Math.max(el.value.length - cursorFromEnd, 0);
+    el.setSelectionRange(newPos, newPos);
+  };
+  format();
+  el.addEventListener('input', ()=>{ format(); if(onChange) onChange(); });
+}
 
 const INCOME_BRACKETS = [
  {limit:14000000, rate:0.06, deduct:0},
@@ -333,7 +352,7 @@ chipGroup('t_type', [
 ], 'general', renderTransfer);
 
 function renderTransfer(){
-  const gain = Number(document.getElementById('t_gain').value)||0;
+  const gain = numVal('t_gain');
   const period = chipVal('t_period');
   const type = chipVal('t_type');
   const multihome = document.getElementById('t_multihome').checked;
@@ -398,14 +417,15 @@ function renderTransfer(){
     <div class="note">1세대1주택 비과세(9억 이하분)는 반영되어 있지 않습니다 — 비과세 대상이면 9억 초과분에 대해서만 위 계산이 적용됩니다.</div>
   `;
 }
-['t_gain','t_multihome','t_years','t_liveyears','t_onehouse'].forEach(id=>{
+attachComma('t_gain', renderTransfer);
+['t_multihome','t_years','t_liveyears','t_onehouse'].forEach(id=>{
   document.getElementById(id).addEventListener('input', renderTransfer);
   document.getElementById(id).addEventListener('change', renderTransfer);
 });
 
 // ===================== 종합소득세 =====================
 function renderIncome(){
-  const base = Number(document.getElementById('i_base').value)||0;
+  const base = numVal('i_base');
   const tax = calcProgressive(base, INCOME_BRACKETS);
   const local = tax*0.1;
   const total = tax+local;
@@ -419,11 +439,11 @@ function renderIncome(){
     </div>
   `;
 }
-document.getElementById('i_base').addEventListener('input', renderIncome);
+attachComma('i_base', renderIncome);
 
 // ===================== 증여세 =====================
 function renderGift(){
-  const value = Number(document.getElementById('g_value').value)||0;
+  const value = numVal('g_value');
   const relation = document.getElementById('g_relation').value;
   const report = document.getElementById('g_report').checked;
   const deduction = GIFT_DEDUCTIONS[relation];
@@ -444,16 +464,17 @@ function renderGift(){
     <div class="note">10년 이내 동일인(직계존속은 부모 합산)으로부터 받은 증여재산은 합산 과세되며, 공제도 10년간 1회 한도입니다. 혼인·출산 증여재산공제(1억, 별도 요건) 등 특례는 미반영.</div>
   `;
 }
-['g_value','g_relation','g_report'].forEach(id=>document.getElementById(id).addEventListener('input', renderGift));
+attachComma('g_value', renderGift);
+['g_relation','g_report'].forEach(id=>document.getElementById(id).addEventListener('input', renderGift));
 document.getElementById('g_relation').addEventListener('change', renderGift);
 document.getElementById('g_report').addEventListener('change', renderGift);
 
 // ===================== 상속세 =====================
 function renderInherit(){
-  const value = Number(document.getElementById('h_value').value)||0;
-  const debt = Number(document.getElementById('h_debt').value)||0;
+  const value = numVal('h_value');
+  const debt = numVal('h_debt');
   const hasSpouse = document.getElementById('h_spouse').checked;
-  const spouseAmt = Number(document.getElementById('h_spouseamt').value)||0;
+  const spouseAmt = numVal('h_spouseamt');
   const report = document.getElementById('h_report').checked;
   document.getElementById('h_spousewrap').style.display = hasSpouse?'block':'none';
 
@@ -480,7 +501,10 @@ function renderInherit(){
     <div class="note">사전증여재산 합산, 금융재산상속공제, 동거주택상속공제 등은 미반영 — 실제 세액과 차이가 클 수 있습니다.</div>
   `;
 }
-['h_value','h_debt','h_spouse','h_spouseamt','h_report'].forEach(id=>{
+attachComma('h_value', renderInherit);
+attachComma('h_debt', renderInherit);
+attachComma('h_spouseamt', renderInherit);
+['h_spouse','h_report'].forEach(id=>{
   document.getElementById(id).addEventListener('input', renderInherit);
   document.getElementById(id).addEventListener('change', renderInherit);
 });
@@ -531,7 +555,7 @@ function acqRateSale(value, houseCnt, adjusted, over85){
 }
 
 function renderAcq(){
-  const value = Number(document.getElementById('a_value').value)||0;
+  const value = numVal('a_value');
   const cause = chipVal('a_cause');
   const houseCnt = chipVal('a_house');
   const adjusted = document.getElementById('a_adjusted').checked;
@@ -566,7 +590,8 @@ function renderAcq(){
     <div class="note">6~9억 구간 유상취득 세율은 근사 산식이며, 정확한 세액은 지방세법 시행령 별표 및 위택스 계산기로 재확인 권장.</div>
   `;
 }
-['a_value','a_adjusted','a_over85'].forEach(id=>{
+attachComma('a_value', renderAcq);
+['a_adjusted','a_over85'].forEach(id=>{
   document.getElementById(id).addEventListener('input', renderAcq);
   document.getElementById(id).addEventListener('change', renderAcq);
 });
@@ -585,9 +610,9 @@ chipGroup('b_house', [
 ], '1', renderBurden);
 
 function renderBurden(){
-  const asset = Number(document.getElementById('b_asset').value)||0;
-  const debt = Number(document.getElementById('b_debt').value)||0;
-  const acq = Number(document.getElementById('b_acq').value)||0;
+  const asset = numVal('b_asset');
+  const debt = numVal('b_debt');
+  const acq = numVal('b_acq');
   const relation = document.getElementById('b_relation').value;
   const period = chipVal('b_period');
   const houseCnt = chipVal('b_house');
@@ -648,7 +673,10 @@ function renderBurden(){
     <div class="note">장기보유특별공제는 보수적으로 미반영했습니다(실제로는 보유연수에 따라 양도세가 더 낮아질 수 있음). 채무는 반드시 임대차계약서·대출서류 등으로 객관적 입증이 가능해야 채무 인수로 인정됩니다(상증세법 §47③, 시행령 §36).</div>
   `;
 }
-['b_asset','b_debt','b_acq','b_relation','b_adjusted','b_over85'].forEach(id=>{
+attachComma('b_asset', renderBurden);
+attachComma('b_debt', renderBurden);
+attachComma('b_acq', renderBurden);
+['b_relation','b_adjusted','b_over85'].forEach(id=>{
   document.getElementById(id).addEventListener('input', renderBurden);
   document.getElementById(id).addEventListener('change', renderBurden);
 });
