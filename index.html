@@ -79,6 +79,15 @@
   .sumline{ display:flex; justify-content:space-between; font-size:13.5px; padding:6px 0; border-bottom:1px dashed var(--line); }
   .sumline:last-child{ border-bottom:none; }
   .sumtotal{ font-size:16px; font-weight:800; color:var(--navy); padding-top:8px; }
+  .cmp{ width:100%; border-collapse:collapse; font-size:12.5px; margin-top:6px; background:#fff; border-radius:10px; overflow:hidden; }
+  .cmp th, .cmp td{ padding:9px 8px; border-bottom:1px solid var(--line); text-align:right; font-variant-numeric:tabular-nums; }
+  .cmp th{ background:var(--navy); color:#fff; font-size:12px; text-align:center; }
+  .cmp td:first-child{ text-align:left; color:var(--sub); font-weight:600; }
+  .cmp tr.total td{ font-weight:800; font-size:14px; color:var(--navy); background:var(--teal-light); border-top:2px solid var(--teal); }
+  .cmp td.win{ color:var(--teal); font-weight:800; }
+  .cmp td.dim{ color:#b7c4c0; }
+  .cmp tr.sub td{ font-size:11.5px; color:var(--sub); padding:5px 8px; border-bottom:1px dashed var(--line); }
+  .cmp tr.sub td:first-child{ padding-left:16px; font-weight:500; }
 </style>
 </head>
 <body>
@@ -240,6 +249,63 @@
     <div class="card result" id="b_result"></div>
   </section>
 
+  <!-- 재산세 -->
+  <section class="panel" id="panel-prop">
+    <div class="card">
+      <h2>재산세 (보유세, 매년 6/1 기준)</h2>
+      <div class="field">
+        <label>자산 유형</label>
+        <div class="chip-group" id="p_type"></div>
+      </div>
+      <div class="field">
+        <label id="p_valuelabel">공시가격 (공동·개별주택가격)</label>
+        <input type="text" inputmode="numeric" id="p_value" value="500000000">
+      </div>
+      <div class="checkline" id="p_oneline"><input type="checkbox" id="p_onehouse" checked> 1세대 1주택 (공정시장가액비율 43~45% + 공시 9억 이하 특례세율)</div>
+      <div class="checkline"><input type="checkbox" id="p_urban" checked> 도시지역분 부과 대상 (과세표준 × 0.14%)</div>
+    </div>
+    <div class="card result" id="p_result"></div>
+  </section>
+
+  <!-- 자동차세 -->
+  <section class="panel" id="panel-car">
+    <div class="card">
+      <h2>자동차세 (비영업용 승용, 소유분)</h2>
+      <div class="field">
+        <label>차종</label>
+        <div class="chip-group" id="c_type"></div>
+      </div>
+      <div class="field" id="c_ccwrap">
+        <label>배기량 (cc)</label>
+        <input type="number" id="c_cc" value="1998" min="0">
+      </div>
+      <div class="field">
+        <label>차령 (최초등록 후 경과연수 — 3년차부터 연 5% 경감, 최대 50%)</label>
+        <input type="number" id="c_age" value="1" min="1" max="30">
+      </div>
+      <div class="checkline"><input type="checkbox" id="c_yearpay"> 1월 연납 (2026년 공제율 3%, 미경과분 2~12월 기준)</div>
+    </div>
+    <div class="card result" id="c_result"></div>
+  </section>
+
+  <!-- 개인 vs 법인 -->
+  <section class="panel" id="panel-compare">
+    <div class="card">
+      <h2>개인사업자 vs 법인 세부담 비교</h2>
+      <div class="field">
+        <label>연간 마진 (대표자 인건비 차감 전 이익)</label>
+        <input type="text" inputmode="numeric" id="x_margin" value="200000000">
+      </div>
+      <div class="field">
+        <label>대표자 연봉 (법인 선택 시 — 법인 손금, 대표자 근로소득)</label>
+        <input type="text" inputmode="numeric" id="x_salary" value="80000000">
+      </div>
+      <div class="checkline"><input type="checkbox" id="x_rental"> 성실신고확인대상 소규모 법인 (부동산임대업 등 — 최저구간 배제, 20%~)</div>
+      <div class="note">개인: 마진 전액을 종합소득 과세표준으로 가정 (대표자 본인 급여는 필요경비 불산입). 법인: 대표자 급여는 손금 산입, 급여에는 근로소득공제·본인 기본공제(150만)·근로소득세액공제를 반영한 근로소득세 부과. 2026년 개시 사업연도 법인세율(10~25%) 적용.</div>
+    </div>
+    <div class="card result" id="x_result"></div>
+  </section>
+
 </main>
 
 <script>
@@ -302,6 +368,9 @@ const tabs = [
   {id:'inherit', label:'상속세'},
   {id:'acq', label:'취득세'},
   {id:'burden', label:'부담부증여'},
+  {id:'prop', label:'재산세'},
+  {id:'car', label:'자동차세'},
+  {id:'compare', label:'개인vs법인'},
 ];
 const nav = document.getElementById('tabnav');
 tabs.forEach((t,i)=>{
@@ -681,8 +750,262 @@ attachComma('b_acq', renderBurden);
   document.getElementById(id).addEventListener('change', renderBurden);
 });
 
+// ===================== 재산세 =====================
+chipGroup('p_type', [
+  {value:'house', label:'주택'},
+  {value:'building', label:'건축물(상가 등)'},
+  {value:'land_sep', label:'토지(별도합산)'},
+  {value:'land_agg', label:'토지(종합합산)'},
+], 'house', renderProp);
+
+// 주택 표준세율 (지방세법 §111①3나)
+const PROP_HOUSE_STD = [
+ {limit:60000000, rate:0.001, deduct:0},
+ {limit:150000000, rate:0.0015, deduct:30000},
+ {limit:300000000, rate:0.0025, deduct:180000},
+ {limit:Infinity, rate:0.004, deduct:630000}
+];
+// 1세대1주택 특례세율 (§111의2, 공시 9억 이하) — 각 구간 0.05%p 인하
+const PROP_HOUSE_SPC = [
+ {limit:60000000, rate:0.0005, deduct:0},
+ {limit:150000000, rate:0.001, deduct:30000},
+ {limit:300000000, rate:0.002, deduct:180000},
+ {limit:Infinity, rate:0.0035, deduct:630000}
+];
+// 토지 종합합산 (§111①1가)
+const PROP_LAND_AGG = [
+ {limit:50000000, rate:0.002, deduct:0},
+ {limit:100000000, rate:0.003, deduct:50000},
+ {limit:Infinity, rate:0.005, deduct:250000}
+];
+// 토지 별도합산 (§111①1나)
+const PROP_LAND_SEP = [
+ {limit:200000000, rate:0.002, deduct:0},
+ {limit:1000000000, rate:0.003, deduct:200000},
+ {limit:Infinity, rate:0.004, deduct:1200000}
+];
+
+function renderProp(){
+  const type = chipVal('p_type');
+  const value = numVal('p_value');
+  const oneHouse = document.getElementById('p_onehouse').checked;
+  const urban = document.getElementById('p_urban').checked;
+
+  document.getElementById('p_oneline').style.display = type==='house' ? 'flex':'none';
+  document.getElementById('p_valuelabel').textContent =
+    type==='house' ? '공시가격 (공동·개별주택가격)' :
+    type==='building' ? '건축물 시가표준액' : '토지 공시지가 합계 (관내 합산)';
+
+  let fmv, fmvNote, tax, rateNote;
+  if(type==='house'){
+    if(oneHouse){
+      fmv = value<=300000000 ? 0.43 : value<=600000000 ? 0.44 : 0.45;
+      fmvNote = `1주택 특례 ${(fmv*100)}%`;
+    } else { fmv = 0.60; fmvNote='일반 60%'; }
+    const base = value*fmv;
+    const useSpc = oneHouse && value<=900000000;
+    tax = calcProgressive(base, useSpc?PROP_HOUSE_SPC:PROP_HOUSE_STD);
+    rateNote = useSpc ? '1주택 특례세율 0.05~0.35% (공시 9억 이하)' : '주택 표준세율 0.1~0.4%';
+    const urbanTax = urban ? base*0.0014 : 0;
+    const eduTax = tax*0.2;
+    const total = tax+urbanTax+eduTax;
+    document.getElementById('p_result').innerHTML = `
+      <div class="biglabel">예상 연간 재산세 등 총액 (도시지역분·지방교육세 포함)</div>
+      <div class="big">${won(total)}</div>
+      <div class="breakdown">
+        <div><span>공시가격</span><b>${won(value)}</b></div>
+        <div><span>공정시장가액비율</span><b>${fmvNote}</b></div>
+        <div><span>과세표준</span><b>${won(base)}</b></div>
+        <div><span>적용세율</span><b>${rateNote}</b></div>
+        <div><span>재산세 본세</span><b>${won(tax)}</b></div>
+        <div><span>도시지역분(0.14%)</span><b>${won(urbanTax)}</b></div>
+        <div><span>지방교육세(본세×20%)</span><b>${won(eduTax)}</b></div>
+        <div><span>7월/9월 분납 (각 1/2)</span><b>${won(total/2)} × 2회</b></div>
+      </div>
+      <div class="note">세부담상한(직전연도 대비 105~130%), 지역자원시설세(소방분, 건물분 별도 부과), 과세표준상한제는 미반영. 세액 20만원 이하는 7월 일괄 고지. 1주택 공정시장가액비율(43~45%)·특례세율은 2026년 시행령 기준 — 매년 변경 가능하므로 위택스 재확인 권장.</div>
+    `;
+    return;
+  }
+  // 건축물·토지
+  fmv = 0.70;
+  const base = value*fmv;
+  if(type==='building'){ tax = base*0.0025; rateNote='일반 건축물 0.25% (골프장·고급오락장 4%, 주거지역 내 공장 0.5% 별도)'; }
+  else if(type==='land_sep'){ tax = calcProgressive(base, PROP_LAND_SEP); rateNote='별도합산 0.2~0.4% 누진 (상가 부속토지 등)'; }
+  else { tax = calcProgressive(base, PROP_LAND_AGG); rateNote='종합합산 0.2~0.5% 누진 (나대지 등)'; }
+  const urbanTax = urban ? base*0.0014 : 0;
+  const eduTax = tax*0.2;
+  const total = tax+urbanTax+eduTax;
+  document.getElementById('p_result').innerHTML = `
+    <div class="biglabel">예상 연간 재산세 등 총액</div>
+    <div class="big">${won(total)}</div>
+    <div class="breakdown">
+      <div><span>시가표준액</span><b>${won(value)}</b></div>
+      <div><span>공정시장가액비율</span><b>70%</b></div>
+      <div><span>과세표준</span><b>${won(base)}</b></div>
+      <div><span>적용세율</span><b>${rateNote}</b></div>
+      <div><span>재산세 본세</span><b>${won(tax)}</b></div>
+      <div><span>도시지역분(0.14%)</span><b>${won(urbanTax)}</b></div>
+      <div><span>지방교육세(본세×20%)</span><b>${won(eduTax)}</b></div>
+    </div>
+    <div class="note">토지분은 관할 지자체 관내 소유 토지를 합산해 과세(9월 고지)하며, 분리과세 대상(농지·공장용지 등 0.07%/0.2%/4%)은 미반영. 건축물분·토지분 구분은 재산세 과세대장 기준으로 확인 필요.</div>
+  `;
+}
+attachComma('p_value', renderProp);
+['p_onehouse','p_urban'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', renderProp);
+  document.getElementById(id).addEventListener('change', renderProp);
+});
+
+// ===================== 자동차세 =====================
+chipGroup('c_type', [
+  {value:'ice', label:'일반 승용(내연·하이브리드)'},
+  {value:'ev', label:'전기·수소 (정액 10만)'},
+], 'ice', renderCar);
+
+function renderCar(){
+  const type = chipVal('c_type');
+  const cc = Number(document.getElementById('c_cc').value)||0;
+  const age = Number(document.getElementById('c_age').value)||1;
+  const yearPay = document.getElementById('c_yearpay').checked;
+  document.getElementById('c_ccwrap').style.display = type==='ice' ? 'block':'none';
+
+  let baseTax, rateNote;
+  if(type==='ev'){
+    baseTax = 100000; rateNote='그 밖의 승용자동차 정액 100,000원';
+  } else {
+    const per = cc<=1000 ? 80 : cc<=1600 ? 140 : 200;
+    baseTax = cc*per;
+    rateNote = `cc당 ${per}원 (${cc<=1000?'1,000cc 이하':cc<=1600?'1,600cc 이하':'1,600cc 초과'})`;
+  }
+  // 차령 경감 (비영업용 승용, 3년차부터 5%/년, 최대 50%) — 전기차는 배기량 기준 아님 → 경감 미적용
+  let reduce = 0;
+  if(type==='ice' && age>=3) reduce = Math.min((age-2)*0.05, 0.5);
+  const reduced = baseTax*(1-reduce);
+  const eduTax = reduced*0.3;
+  const annual = reduced+eduTax;
+  // 연납 공제: 1월 신청 기준 2~12월(11/12) 미경과분 × 3%
+  const credit = yearPay ? annual*(11/12)*0.03 : 0;
+  const total = annual-credit;
+
+  document.getElementById('c_result').innerHTML = `
+    <div class="biglabel">예상 연간 자동차세 총액 (지방교육세 포함)</div>
+    <div class="big">${won(total)}</div>
+    <div class="breakdown">
+      <div><span>적용세율</span><b>${rateNote}</b></div>
+      <div><span>산출 본세</span><b>${won(baseTax)}</b></div>
+      <div><span>차령 경감(${(reduce*100).toFixed(0)}%)</span><b>-${won(baseTax*reduce)}</b></div>
+      <div><span>지방교육세(30%)</span><b>${won(eduTax)}</b></div>
+      <div><span>연납공제(3%, 미경과분)</span><b>-${won(credit)}</b></div>
+      ${yearPay?'':`<div><span>6월/12월 분납 (각 1/2)</span><b>${won(annual/2)} × 2회</b></div>`}
+    </div>
+    <div class="note">비영업용 승용차 기준(지방세법 §127①1). 승합·화물·영업용은 별도 세율. 연납 공제율은 2026년 3%(시행령)로 연도별 변경 가능. 연세액 10만원 미만(경차 등)은 6월 일괄 부과. 연납 후 양도·말소 시 미경과분 일할 환급.</div>
+  `;
+}
+['c_cc','c_age','c_yearpay'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', renderCar);
+  document.getElementById(id).addEventListener('change', renderCar);
+});
+
+// ===================== 개인 vs 법인 =====================
+// 법인세율 — 2026.1.1 이후 개시 사업연도 (법인세법 §55①, 2025.12 개정)
+const CORP_BRACKETS = [
+ {limit:200000000, rate:0.10, deduct:0},
+ {limit:20000000000, rate:0.20, deduct:20000000},
+ {limit:300000000000, rate:0.22, deduct:420000000},
+ {limit:Infinity, rate:0.25, deduct:9420000000}
+];
+// 성실신고확인대상 소규모 법인(부동산임대업 등) — 최저구간 배제
+const CORP_BRACKETS_RENTAL = [
+ {limit:20000000000, rate:0.20, deduct:0},
+ {limit:300000000000, rate:0.22, deduct:400000000},
+ {limit:Infinity, rate:0.25, deduct:9400000000}
+];
+
+// 근로소득공제 (소득세법 §47①, 한도 2,000만)
+function earnedIncomeDeduction(gross){
+  let d;
+  if(gross<=5000000) d = gross*0.7;
+  else if(gross<=15000000) d = 3500000+(gross-5000000)*0.4;
+  else if(gross<=45000000) d = 7500000+(gross-15000000)*0.15;
+  else if(gross<=100000000) d = 12000000+(gross-45000000)*0.05;
+  else d = 14750000+(gross-100000000)*0.02;
+  return Math.min(d, 20000000);
+}
+// 근로소득세액공제 (소득세법 §59)
+function earnedIncomeTaxCredit(calcTax, gross){
+  const raw = calcTax<=1300000 ? calcTax*0.55 : 715000+(calcTax-1300000)*0.3;
+  let cap;
+  if(gross<=33000000) cap = 740000;
+  else if(gross<=70000000) cap = Math.max(740000-(gross-33000000)*0.008, 660000);
+  else if(gross<=120000000) cap = Math.max(660000-(gross-70000000)*0.5, 500000);
+  else cap = Math.max(500000-(gross-120000000)*0.5, 200000);
+  return Math.min(raw, cap);
+}
+// 간이 근로소득세 (본인 기본공제 150만만 반영)
+function calcSalaryTax(gross){
+  const eid = earnedIncomeDeduction(gross);
+  const base = Math.max(gross - eid - 1500000, 0);
+  const calc = calcProgressive(base, INCOME_BRACKETS);
+  const credit = earnedIncomeTaxCredit(calc, gross);
+  const national = Math.max(calc-credit, 0);
+  return {eid, base, calc, credit, national, local:national*0.1, total:national*1.1};
+}
+
+function renderCompare(){
+  const margin = numVal('x_margin');
+  const salary = numVal('x_salary');
+  const rental = document.getElementById('x_rental').checked;
+
+  // A. 개인사업자
+  const soloNational = calcProgressive(margin, INCOME_BRACKETS);
+  const soloTotal = soloNational*1.1;
+
+  // B. 법인
+  const corpBase = Math.max(margin - salary, 0);
+  const corpNational = calcProgressive(corpBase, rental?CORP_BRACKETS_RENTAL:CORP_BRACKETS);
+  const corpTotal = corpNational*1.1;
+  const sal = calcSalaryTax(salary);
+  const bTotal = corpTotal + sal.total;
+
+  const diff = soloTotal - bTotal;
+  const winner = diff>0 ? '법인' : diff<0 ? '개인' : '동일';
+  const overpay = salary>margin;
+  const soloAfter = margin - soloTotal;               // 개인 세후 가처분
+  const ceoNet = salary - sal.total;                  // 대표자 세후 수령
+  const corpRetain = Math.max(corpBase - corpTotal,0); // 법인 세후 유보
+  const w = (isA)=> (winner==='동일') ? '' : ((winner==='개인')===isA ? ' class="win"':'');
+  const dash = '<td class="dim">—</td>';
+  const pct = (t)=> margin>0 ? (t/margin*100).toFixed(1)+'%' : '0.0%';
+
+  document.getElementById('x_result').innerHTML = `
+    <div class="biglabel">세부담 비교 결과</div>
+    <div class="big" style="color:${winner==='동일'?'var(--sub)':'var(--teal)'}">${winner==='동일'?'차이 없음':`${winner}이 ${won(Math.abs(diff))} 유리`}</div>
+    <table class="cmp">
+      <tr><th style="text-align:left;">구분</th><th>A. 개인사업자</th><th>B. 법인+대표급여</th></tr>
+      <tr><td>마진 (인건비 차감 전)</td><td>${won(margin)}</td><td>${won(margin)}</td></tr>
+      <tr><td>대표자 연봉 (손금)</td>${dash}<td>${won(salary)}</td></tr>
+      <tr><td>과세표준</td><td>${won(margin)}</td><td>법인 ${won(corpBase)}<br>근로 ${won(sal.base)}</td></tr>
+      <tr><td>종합소득세+지방</td><td>${won(soloTotal)}</td>${dash}</tr>
+      <tr><td>법인세+지방 ${rental?'<br>(임대법인 20%~)':''}</td>${dash}<td>${won(corpTotal)}</td></tr>
+      <tr class="sub"><td>근로소득공제</td>${dash}<td>-${won(sal.eid)}</td></tr>
+      <tr class="sub"><td>근로소득세액공제</td>${dash}<td>-${won(sal.credit)}</td></tr>
+      <tr><td>근로소득세+지방</td>${dash}<td>${won(sal.total)}</td></tr>
+      <tr class="total"><td>총 세부담</td><td${w(true)}>${won(soloTotal)}</td><td${w(false)}>${won(bTotal)}</td></tr>
+      <tr><td>실효세율 (마진 대비)</td><td${w(true)}>${pct(soloTotal)}</td><td${w(false)}>${pct(bTotal)}</td></tr>
+      <tr><td>대표자 세후 수령</td><td>${won(soloAfter)}</td><td>${won(ceoNet)}</td></tr>
+      <tr><td>법인 세후 유보</td>${dash}<td>${won(corpRetain)}</td></tr>
+      <tr><td>세후 합계 (수령+유보)</td><td>${won(soloAfter)}</td><td>${won(ceoNet+corpRetain)}</td></tr>
+    </table>
+    ${overpay?'<div class="note" style="color:var(--warn)">⚠ 연봉이 마진을 초과 — 법인은 결손(과표 0) 처리했으나, 과다보수는 부당행위계산 부인(법인세법 §52) 리스크 검토 필요.</div>':''}
+    <div class="note">법인 세후 유보 ${won(corpRetain)}은 법인 내 자금 기준입니다. 대표자가 배당으로 회수 시 배당소득세(원천 15.4%, 2천만 초과 종합과세 또는 분리과세 선택)가 추가되어 격차가 줄어듭니다. 4대보험(개인 지역가입 vs 법인 직장가입), 개인 소득공제·감면, 성실신고확인비용, 노란우산공제 등은 미반영 — 의사결정 전 정밀 시뮬레이션 필요.</div>
+  `;
+}
+attachComma('x_margin', renderCompare);
+attachComma('x_salary', renderCompare);
+document.getElementById('x_rental').addEventListener('change', renderCompare);
+
 // initial render
-renderTransfer(); renderIncome(); renderGift(); renderInherit(); renderAcq(); renderBurden();
+renderTransfer(); renderIncome(); renderGift(); renderInherit(); renderAcq(); renderBurden(); renderProp(); renderCar(); renderCompare();
 </script>
 </body>
 </html>
