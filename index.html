@@ -173,6 +173,7 @@
           <option value="none">그 외 (공제 없음)</option>
         </select>
       </div>
+      <div class="checkline" id="g_skipline"><input type="checkbox" id="g_skip"> 세대생략 증여 (조부모 → 손자녀 등, 자녀 아닌 직계비속)</div>
       <div class="checkline"><input type="checkbox" id="g_report"> 신고기한 내 자진신고 (신고세액공제 3%)</div>
     </div>
     <div class="card result" id="g_result"></div>
@@ -195,8 +196,24 @@
         <label>배우자 상속공제액 (최소 5억 ~ 최대 30억, 실제 배우자 상속분 기준)</label>
         <input type="text" inputmode="numeric" id="h_spouseamt" value="500000000">
       </div>
+      <div class="divider"></div>
+      <div class="field">
+        <label>순금융재산가액 계산 — 금융재산 총액 (예금·보험·주식·펀드 등)</label>
+        <input type="text" inputmode="numeric" id="h_finasset" value="0">
+      </div>
+      <div class="field">
+        <label>금융채무 (금융기관 차입금 등)</label>
+        <input type="text" inputmode="numeric" id="h_findebt" value="0">
+      </div>
+      <div class="checkline"><input type="checkbox" id="h_livehouse"> 동거주택 상속공제 대상 (10년 이상 동거·1세대1주택·무주택 직계비속 상속인)</div>
+      <div class="field" id="h_livehousewrap" style="display:none;">
+        <label>상속주택가액 (담보된 피상속인 채무액 차감 후)</label>
+        <input type="text" inputmode="numeric" id="h_liveamt" value="0">
+      </div>
+      <div class="checkline"><input type="checkbox" id="h_skip"> 세대생략 상속 (자녀 아닌 직계비속·손자녀 등이 상속, 대습상속 제외)</div>
+      <div class="checkline" id="h_skipminorline" style="display:none; padding-left:16px;"><input type="checkbox" id="h_skipminor"> 그 상속인이 미성년자</div>
       <div class="checkline"><input type="checkbox" id="h_report" checked> 신고기한 내 신고 (신고세액공제 3%)</div>
-      <div class="note">일괄공제(2억 기초공제+인적공제 vs 5억 중 큰 금액, 통상 5억 선택)만 반영한 간이 계산입니다. 금융재산상속공제, 동거주택상속공제 등은 미반영.</div>
+      <div class="note">일괄공제(2억 기초공제+인적공제 vs 5억 중 큰 금액, 통상 5억 선택), 금융재산상속공제(상증법§22), 동거주택상속공제(상증법§23의2, 최대 6억)를 반영한 간이 계산입니다. 재해손실공제·가업상속공제·상속공제 종합한도(사전증여 등 차감) 등은 미반영.</div>
     </div>
     <div class="card result" id="h_result"></div>
   </section>
@@ -280,6 +297,29 @@
   </section>
 
 
+  <!-- 법인세 -->
+  <section class="panel" id="panel-corp">
+    <div class="card">
+      <h2>법인세 (2026.1.1 이후 개시 사업연도)</h2>
+      <div class="field">
+        <label>각사업연도소득 과세표준 (토지등 양도소득 포함)</label>
+        <input type="text" inputmode="numeric" id="j_base" value="300000000">
+      </div>
+      <div class="field">
+        <label>주택·별장·조합원입주권·분양권 양도소득 (해당 시)</label>
+        <input type="text" inputmode="numeric" id="j_house" value="0">
+      </div>
+      <div class="field">
+        <label>비사업용 토지 양도소득 (해당 시)</label>
+        <input type="text" inputmode="numeric" id="j_land" value="0">
+      </div>
+      <div class="checkline"><input type="checkbox" id="j_unreg"> 미등기 양도 (추가세율 40%)</div>
+      <div class="checkline"><input type="checkbox" id="j_rental"> 성실신고확인대상 소규모 법인 (부동산임대업 등 — 최저구간 배제, 20%~)</div>
+      <div class="note">토지등 양도소득은 각사업연도소득에 포함되어 일반 법인세가 과세되고, 별도로 양도소득 × 추가세율(주택 등 20%, 비사업용토지 10%)의 법인세가 <b>추가</b> 납부됩니다(법인세법 §55의2). 양도차손 통산·이월결손금 공제 등은 미반영.</div>
+    </div>
+    <div class="card result" id="j_result"></div>
+  </section>
+
   <!-- 개인 vs 법인 -->
   <section class="panel" id="panel-compare">
     <div class="card">
@@ -361,6 +401,7 @@ const tabs = [
   {id:'acq', label:'취득세'},
   {id:'burden', label:'부담부증여'},
   {id:'prop', label:'재산세'},
+  {id:'corp', label:'법인세'},
   {id:'compare', label:'개인vs법인'},
 ];
 const nav = document.getElementById('tabnav');
@@ -506,11 +547,18 @@ function renderGift(){
   const value = numVal('g_value');
   const relation = document.getElementById('g_relation').value;
   const report = document.getElementById('g_report').checked;
+  const isDesc = relation==='lineal_desc_adult' || relation==='lineal_desc_minor';
+  document.getElementById('g_skipline').style.display = isDesc ? 'flex':'none';
+  const skip = isDesc && document.getElementById('g_skip').checked;
+
   const deduction = GIFT_DEDUCTIONS[relation];
   const base = Math.max(value-deduction,0);
   const tax = calcProgressive(base, GIFT_BRACKETS);
-  const credit = report ? tax*0.03 : 0;
-  const total = tax-credit;
+  // 세대생략 할증 (상증법 §57): 산출세액 × 30%, 미성년 수증자 + 증여재산가액 20억 초과 시 40%
+  const skipRate = skip ? ((relation==='lineal_desc_minor' && value>2000000000) ? 0.4 : 0.3) : 0;
+  const surtax = tax * skipRate;
+  const credit = report ? (tax+surtax)*0.03 : 0;
+  const total = tax+surtax-credit;
   document.getElementById('g_result').innerHTML = `
     <div class="biglabel">예상 납부세액</div>
     <div class="big">${won(total)}</div>
@@ -519,15 +567,17 @@ function renderGift(){
       <div><span>증여재산공제</span><b>-${won(deduction)}</b></div>
       <div><span>과세표준</span><b>${won(base)}</b></div>
       <div><span>산출세액</span><b>${won(tax)}</b></div>
+      ${skip?`<div><span>세대생략 할증(${skipRate*100}%)</span><b>+${won(surtax)}</b></div>`:''}
       <div><span>신고세액공제(3%)</span><b>-${won(credit)}</b></div>
     </div>
-    <div class="note">10년 이내 동일인(직계존속은 부모 합산)으로부터 받은 증여재산은 합산 과세되며, 공제도 10년간 1회 한도입니다. 혼인·출산 증여재산공제(1억, 별도 요건) 등 특례는 미반영.</div>
+    <div class="note">10년 이내 동일인(직계존속은 부모 합산)으로부터 받은 증여재산은 합산 과세되며, 공제도 10년간 1회 한도입니다. 혼인·출산 증여재산공제(1억, 별도 요건) 등 특례는 미반영.${skip?' 세대생략 할증은 자녀가 이미 사망하여 손자녀가 대신 증여받는 경우(대습)에는 적용되지 않습니다(상증법 §57 단서).':''}</div>
   `;
 }
 attachComma('g_value', renderGift);
-['g_relation','g_report'].forEach(id=>document.getElementById(id).addEventListener('input', renderGift));
+['g_relation','g_report','g_skip'].forEach(id=>document.getElementById(id).addEventListener('input', renderGift));
 document.getElementById('g_relation').addEventListener('change', renderGift);
 document.getElementById('g_report').addEventListener('change', renderGift);
+document.getElementById('g_skip').addEventListener('change', renderGift);
 
 // ===================== 상속세 =====================
 function renderInherit(){
@@ -535,16 +585,42 @@ function renderInherit(){
   const debt = numVal('h_debt');
   const hasSpouse = document.getElementById('h_spouse').checked;
   const spouseAmt = numVal('h_spouseamt');
+  const finAsset = numVal('h_finasset');
+  const finDebt = numVal('h_findebt');
+  const hasLiveHouse = document.getElementById('h_livehouse').checked;
+  const liveAmt = numVal('h_liveamt');
+  const skip = document.getElementById('h_skip').checked;
+  const skipMinor = document.getElementById('h_skipminor').checked;
   const report = document.getElementById('h_report').checked;
   document.getElementById('h_spousewrap').style.display = hasSpouse?'block':'none';
+  document.getElementById('h_livehousewrap').style.display = hasLiveHouse?'block':'none';
+  document.getElementById('h_skipminorline').style.display = skip?'flex':'none';
 
   const basicDeduction = 500000000; // 일괄공제
   const spouseDeduction = hasSpouse ? Math.min(Math.max(spouseAmt,500000000),3000000000) : 0;
-  const totalDeduction = basicDeduction + spouseDeduction;
+
+  // 금융재산 상속공제 (상증법 §22, 시행령 §19)
+  const netFinancial = Math.max(finAsset-finDebt,0);
+  let finDeduction;
+  if(netFinancial<=0) finDeduction = 0;
+  else if(netFinancial<=20000000) finDeduction = netFinancial;
+  else if(netFinancial<=100000000) finDeduction = 20000000;
+  else if(netFinancial<=1000000000) finDeduction = netFinancial*0.2;
+  else finDeduction = 200000000;
+
+  // 동거주택 상속공제 (상증법 §23의2, 최대 6억)
+  const liveHouseDeduction = hasLiveHouse ? Math.min(Math.max(liveAmt,0),600000000) : 0;
+
+  const totalDeduction = basicDeduction + spouseDeduction + finDeduction + liveHouseDeduction;
   const base = Math.max(value-debt-totalDeduction,0);
   const tax = calcProgressive(base, GIFT_BRACKETS);
-  const credit = report ? tax*0.03 : 0;
-  const total = tax-credit;
+
+  // 세대를 건너뛴 상속에 대한 할증과세 (상증법 §27): 30%, 미성년 상속인 + 상속재산가액 20억 초과 시 40%. 대습상속은 적용 제외.
+  const skipRate = skip ? ((skipMinor && value>2000000000) ? 0.4 : 0.3) : 0;
+  const surtax = tax * skipRate;
+
+  const credit = report ? (tax+surtax)*0.03 : 0;
+  const total = tax+surtax-credit;
 
   document.getElementById('h_result').innerHTML = `
     <div class="biglabel">예상 납부세액</div>
@@ -554,20 +630,27 @@ function renderInherit(){
       <div><span>채무</span><b>-${won(debt)}</b></div>
       <div><span>일괄공제</span><b>-${won(basicDeduction)}</b></div>
       <div><span>배우자상속공제</span><b>-${won(spouseDeduction)}</b></div>
+      <div><span>금융재산상속공제</span><b>-${won(finDeduction)}</b></div>
+      ${hasLiveHouse?`<div><span>동거주택상속공제</span><b>-${won(liveHouseDeduction)}</b></div>`:''}
       <div><span>과세표준</span><b>${won(base)}</b></div>
       <div><span>산출세액</span><b>${won(tax)}</b></div>
+      ${skip?`<div><span>세대생략 할증(${skipRate*100}%)</span><b>+${won(surtax)}</b></div>`:''}
       <div><span>신고세액공제(3%)</span><b>-${won(credit)}</b></div>
     </div>
-    <div class="note">사전증여재산 합산, 금융재산상속공제, 동거주택상속공제 등은 미반영 — 실제 세액과 차이가 클 수 있습니다.</div>
+    <div class="note">순금융재산가액=금융재산−금융채무이며, 예금·보험·주식은 상속개시일 현재(주식은 전후 2개월 평균종가) 평가액 기준입니다. 동거주택상속공제는 10년 이상 동거·1세대1주택·무주택 요건을 갖춘 직계비속 상속인에게만 적용되며 배우자 상속분에는 적용되지 않습니다.${skip?' 세대생략 할증은 상속인이 될 자녀 등이 상속개시 전 사망·결격되어 손자녀가 대신 상속받는 대습상속인 경우에는 적용되지 않습니다(상증법 §27).':''} 사전증여재산 합산, 가업·영농상속공제, 재해손실공제, 상속공제 종합한도(사전증여·상속인 외 유증 등 차감) 등은 미반영 — 실제 세액과 차이가 클 수 있습니다.</div>
   `;
 }
 attachComma('h_value', renderInherit);
 attachComma('h_debt', renderInherit);
 attachComma('h_spouseamt', renderInherit);
-['h_spouse','h_report'].forEach(id=>{
+attachComma('h_finasset', renderInherit);
+attachComma('h_findebt', renderInherit);
+attachComma('h_liveamt', renderInherit);
+['h_spouse','h_report','h_livehouse','h_skip','h_skipminor'].forEach(id=>{
   document.getElementById(id).addEventListener('input', renderInherit);
   document.getElementById(id).addEventListener('change', renderInherit);
 });
+
 
 // ===================== 취득세 =====================
 chipGroup('a_cause', [
@@ -896,6 +979,49 @@ function calcSalaryTax(gross){
 // 2026년 건강보험료율 7.19%, 장기요양 = 건보료 × 13.14%
 const HI_RATE = 0.0719, LTC_RATIO = 0.1314;
 
+// ===================== 법인세 =====================
+function renderCorp(){
+  const base = numVal('j_base');
+  const houseGain = numVal('j_house');
+  const landGain = numVal('j_land');
+  const unreg = document.getElementById('j_unreg').checked;
+  const rental = document.getElementById('j_rental').checked;
+
+  const brackets = rental ? CORP_BRACKETS_RENTAL : CORP_BRACKETS;
+  const regular = calcProgressive(base, brackets);
+  // 토지등 양도소득 추가과세 (법인세법 §55의2)
+  const houseRate = unreg ? 0.40 : 0.20;
+  const landRate = unreg ? 0.40 : 0.10;
+  const addHouse = houseGain * houseRate;
+  const addLand = landGain * landRate;
+  const national = regular + addHouse + addLand;
+  const local = national * 0.1;
+  const total = national + local;
+  const br = (b)=>{ if(b<=0) return brackets[0]; for(const x of brackets){ if(b<=x.limit) return x; } };
+  const b = br(base);
+  const gainWarn = (houseGain+landGain) > base;
+
+  document.getElementById('j_result').innerHTML = `
+    <div class="biglabel">예상 법인세 등 총액 (지방소득세 포함)</div>
+    <div class="big">${won(total)}</div>
+    <div class="breakdown">
+      <div><span>과세표준</span><b>${won(base)}</b></div>
+      <div><span>적용 한계세율 ${rental?'(임대법인 20%~)':''}</span><b>${(b.rate*100).toLocaleString('ko-KR')}%</b></div>
+      <div><span>산출 산식</span><b>${wonShort(Math.round(base))} × ${(b.rate*100).toLocaleString('ko-KR')}%${b.deduct?` − ${won(b.deduct)}`:''}</b></div>
+      <div><span>일반 법인세</span><b>${won(regular)}</b></div>
+      ${houseGain>0?`<div><span>주택 등 양도 추가과세(${houseRate*100}%)</span><b>+${won(addHouse)}</b></div>`:''}
+      ${landGain>0?`<div><span>비사업용토지 추가과세(${landRate*100}%)</span><b>+${won(addLand)}</b></div>`:''}
+      <div><span>법인지방소득세(10%)</span><b>${won(local)}</b></div>
+    </div>
+    ${gainWarn?'<div class="note" style="color:var(--warn)">⚠ 양도소득 합계가 과세표준을 초과 — 양도소득은 과세표준에 포함된 금액이어야 합니다. 입력값 확인 필요.</div>':''}
+    <div class="note">추가과세는 각사업연도소득 법인세와 <b>별도로 합산</b> 납부하며, 법인의 결손 여부와 무관하게 양도소득이 있으면 부과됩니다. 지방소득세는 추가과세분에도 10% 적용. 중소기업 특별세액감면·세액공제, 최저한세, 가산세는 미반영.</div>
+  `;
+}
+attachComma('j_base', renderCorp);
+attachComma('j_house', renderCorp);
+attachComma('j_land', renderCorp);
+['j_unreg','j_rental'].forEach(id=>document.getElementById(id).addEventListener('change', renderCorp));
+
 function renderCompare(){
   const margin = numVal('x_margin');
   const salary = numVal('x_salary');
@@ -953,15 +1079,15 @@ function renderCompare(){
       <tr><td>법인세+지방 ${rental?'<br>(임대법인 20%~)':''}</td>${dash}<td>${won(corpTax)}</td></tr>
       <tr class="sub"><td>근로소득세액공제</td>${dash}<td>-${won(sal.credit)}</td></tr>
       <tr><td>근로소득세+지방</td>${dash}<td>${won(sal.total)}</td></tr>
-      <tr><td>건강보험료+장기요양 (연간)</td><td>${won(soloHI)}<br><span style="font-size:10.5px;">지역: 소득 × 7.19% × 1.1314</span></td><td>${won(ceoHI)}<br><span style="font-size:10.5px;">직장: 보수 × 7.19% × 1.1314</span></td></tr>
-      <tr class="total"><td>총 부담 (세금+건보)</td><td${w(true)}>${won(soloTotal)}</td><td${w(false)}>${won(bTotal)}</td></tr>
-      <tr><td>실효부담률 (마진 대비)</td><td${w(true)}>${pct(soloTotal)}</td><td${w(false)}>${pct(bTotal)}</td></tr>
-      <tr><td>대표자 실수령 (세금·건보 차감)</td><td>${won(soloAfter)}</td><td>${won(ceoNet)}</td></tr>
+      <tr><td>건강보험료+장기요양 (연간)</td><td>${won(soloHI)} <b style="color:var(--warn)">이상</b><br><span style="font-size:10.5px;">지역가입자 — 소득분(소득 × 7.19% × 1.1314)만 반영<br><b>재산·자동차분은 재산 내역에 따라 달라져 확인 불가</b></span></td><td>${won(ceoHI)}<br><span style="font-size:10.5px;"><b>직장가입자</b> — 보수 × 7.19% × 1.1314 (본인+회사분)</span></td></tr>
+      <tr class="total"><td>총 부담 (세금+건보)</td><td${w(true)}>${won(soloTotal)} 이상</td><td${w(false)}>${won(bTotal)}</td></tr>
+      <tr><td>실효부담률 (마진 대비)</td><td${w(true)}>${pct(soloTotal)} 이상</td><td${w(false)}>${pct(bTotal)}</td></tr>
+      <tr><td>대표자 실수령 (세금·건보 차감)</td><td>${won(soloAfter)} 이하</td><td>${won(ceoNet)}</td></tr>
       <tr><td>법인 세후 유보</td>${dash}<td>${won(corpRetain)}</td></tr>
-      <tr><td>실수령+유보 합계</td><td>${won(soloAfter)}</td><td>${won(ceoNet+corpRetain)}</td></tr>
+      <tr><td>실수령+유보 합계</td><td>${won(soloAfter)} 이하</td><td>${won(ceoNet+corpRetain)}</td></tr>
     </table>
     ${overpay?'<div class="note" style="color:var(--warn)">⚠ 연봉이 마진을 초과 — 법인은 결손(과표 0) 처리했으나, 과다보수는 부당행위계산 부인(법인세법 §52) 리스크 검토 필요.</div>':''}
-    <div class="note">한계세율 = 과세표준이 속한 구간의 세율이며, 세액은 [과표 × 한계세율 − 누진공제]로 산출됩니다(근로소득세는 여기서 근로소득세액공제 추가 차감). <b>국민연금(9.5%)은 연령·가입이력에 따라 달라져 비교에서 제외</b>했습니다. 건강보험료는 2026년 요율(7.19%, 장기요양 13.14%) 기준 — 개인 지역가입자는 소득분만 반영(재산·자동차분, 보험료 상·하한 미반영), 법인 대표는 본인+회사부담 합계(1인 법인 실질 전액 부담, 회사분 손금산입에 따른 법인세 절감 효과는 미반영·보수적)입니다. 법인 유보금 배당 회수 시 배당소득세 및 보수외소득월액 건보료 추가 가능. 개인 소득공제·감면, 성실신고확인비용, 노란우산공제 미반영.</div>
+    <div class="note">한계세율 = 과세표준이 속한 구간의 세율이며, 세액은 [과표 × 한계세율 − 누진공제]로 산출됩니다(근로소득세는 여기서 근로소득세액공제 추가 차감). <b>국민연금(9.5%)은 연령·가입이력에 따라 달라져 비교에서 제외</b>했습니다. 건강보험료는 2026년 요율(7.19%, 장기요양 13.14%) 기준. <b>개인사업자는 지역가입자</b>로 소득분만 반영한 최소치이며, 재산·자동차분은 재산 내역에 따라 달라 정확한 금액 확인이 불가하므로 실제 부담은 표시액보다 큽니다(즉, 개인 측이 실제로는 더 불리할 수 있음). <b>법인 대표는 직장가입자</b>로 본인+회사부담 합계(1인 법인 실질 전액 부담, 회사분 손금산입에 따른 법인세 절감 효과 미반영)입니다. 법인 유보금 배당 회수 시 배당소득세 및 보수외소득월액 건보료 추가 가능. 개인 소득공제·감면, 성실신고확인비용, 노란우산공제 미반영.</div>
   `;
 }
 attachComma('x_margin', renderCompare);
@@ -1028,8 +1154,17 @@ rateBox('gift','과표·세율표 보기',
   '세대생략 증여(손자녀 등)는 산출세액의 30%(미성년·20억 초과 40%) 할증.');
 
 // 상속세
-rateBox('inherit','과표·세율표 보기', HTML_GIFT_TABLE,
-  '일괄공제 5억(기초공제+인적공제와 선택), 배우자공제 최소 5억~최대 30억(법정지분 한도), 금융재산공제 최대 2억 별도.');
+rateBox('inherit','과표·세율표 보기',
+  HTML_GIFT_TABLE +
+  rateTable('금융재산 상속공제 (상증법 §22, 시행령 §19)', `
+    <tr><td>순금융재산 2,000만원 이하</td><td colspan="2">전액 공제</td></tr>
+    <tr><td>2,000만원 초과 ~ 1억원 이하</td><td colspan="2">2,000만원</td></tr>
+    <tr><td>1억원 초과 ~ 10억원 이하</td><td colspan="2">순금융재산×20%</td></tr>
+    <tr><td>10억원 초과</td><td colspan="2">2억원 (한도)</td></tr>`, ['구간','공제액','']) +
+  rateTable('세대를 건너뛴 상속 할증과세 (상증법 §27)', `
+    <tr><td>일반 (상속인이 자녀 아닌 직계비속)</td><td>30%</td><td>산출세액×해당분 비율</td></tr>
+    <tr><td>미성년 상속인 + 상속재산 20억 초과</td><td>40%</td><td>대습상속은 적용 배제</td></tr>`, ['구분','할증률','비고']),
+  '일괄공제 5억(기초공제+인적공제와 선택), 배우자공제 최소 5억~최대 30억(법정지분 한도). 동거주택상속공제(상증법§23의2)는 10년 이상 동거·1세대1주택 요건 충족 시 주택가액의 100%(최대 6억) 별도 공제. 상속공제 총합계는 사전증여재산 등을 차감한 공제적용한도액을 초과할 수 없음(상증법§24).');
 
 // 취득세 (주택)
 rateBox('acq','과표·세율표 보기',
@@ -1064,6 +1199,18 @@ rateBox('prop','과표·세율표 보기',
   '1주택 특례세율은 공시 9억 이하만 적용. 공정시장가액비율: 주택 60%(1주택 43~45%), 토지·건축물 70% — 2026년 시행령 기준.');
 
 
+// 법인세: 세율표 + 토지등 양도 추가과세표
+rateBox('corp','과표·세율표 보기',
+  rateTable('법인세율 — 2026.1.1 이후 개시 사업연도 (법인세법 §55①, 영리·비영리법인)', bracketRowsHTML(CORP_BRACKETS)) +
+  rateTable('조합법인 등 당기순이익과세 특례 (조특법 §72①, 2026.1.1 이후 개시 사업연도)', `
+    <tr><td>20억원 이하</td><td>9%</td><td>—</td></tr>
+    <tr><td>20억원 초과</td><td>15%</td><td>120,000,000</td></tr>`, ['과세표준','세율','누진공제']) +
+  rateTable('토지등 양도소득 추가과세 (법인세법 §55의2)', `
+    <tr><td>주택 (부수토지 포함) · 별장</td><td>20%</td><td>미등기 40%</td></tr>
+    <tr><td>조합원입주권 · 분양권</td><td>20%</td><td>—</td></tr>
+    <tr><td>비사업용 토지</td><td>10%</td><td>미등기 40%</td></tr>`, ['양도 자산','추가세율','비고']),
+  '성실신고확인대상 소규모 법인은 최저구간 배제(20%~). 추가과세는 일반 법인세와 합산 납부, 지방소득세 10% 별도. 조합법인 특례세율은 신협·새마을금고·농협 등 조특법§72① 각호 법인 대상이며, 2025년 세법개정으로 20억 초과분 세율이 12%→15%로 상향(적용기한 ~2028.12.31).');
+
 // 개인vs법인: 종소세율 + 법인세율
 rateBox('compare','과표·세율표 보기',
   HTML_INCOME_TABLE +
@@ -1071,7 +1218,7 @@ rateBox('compare','과표·세율표 보기',
   '성실신고확인대상 소규모 법인(부동산임대업 등)은 최저구간(10%) 배제, 200억 이하 20%. 각 세목에 지방소득세 10% 별도.');
 
 // initial render
-renderTransfer(); renderIncome(); renderGift(); renderInherit(); renderAcq(); renderBurden(); renderProp(); renderCompare();
+renderTransfer(); renderIncome(); renderGift(); renderInherit(); renderAcq(); renderBurden(); renderProp(); renderCorp(); renderCompare();
 </script>
 </body>
 </html>
