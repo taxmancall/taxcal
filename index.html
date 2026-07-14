@@ -88,6 +88,18 @@
   .cmp td.dim{ color:#b7c4c0; }
   .cmp tr.sub td{ font-size:11.5px; color:var(--sub); padding:5px 8px; border-bottom:1px dashed var(--line); }
   .cmp tr.sub td:first-child{ padding-left:16px; font-weight:500; }
+  .ratebox{ margin-top:10px; }
+  .ratebox details{ background:#fff; border:1px solid var(--line); border-radius:12px; padding:0; overflow:hidden; }
+  .ratebox summary{ cursor:pointer; padding:11px 14px; font-size:13px; font-weight:700; color:var(--navy); list-style:none; display:flex; justify-content:space-between; align-items:center; }
+  .ratebox summary::after{ content:'▾'; color:var(--sub); font-size:12px; }
+  .ratebox details[open] summary::after{ content:'▴'; }
+  .ratebox .rt-title{ font-size:11.5px; font-weight:700; color:var(--sub); padding:8px 14px 2px; }
+  table.rt{ width:100%; border-collapse:collapse; font-size:12px; }
+  table.rt th{ background:var(--teal-light); color:var(--navy); font-size:11.5px; padding:6px 8px; text-align:center; border-bottom:1px solid var(--line); }
+  table.rt td{ padding:6px 10px; border-bottom:1px solid var(--line); text-align:right; font-variant-numeric:tabular-nums; }
+  table.rt td:first-child{ text-align:left; color:var(--sub); }
+  table.rt tr:last-child td{ border-bottom:none; }
+  .ratebox .rt-note{ font-size:11px; color:var(--sub); padding:8px 14px 12px; line-height:1.5; }
 </style>
 </head>
 <body>
@@ -976,6 +988,10 @@ function renderCompare(){
   const w = (isA)=> (winner==='동일') ? '' : ((winner==='개인')===isA ? ' class="win"':'');
   const dash = '<td class="dim">—</td>';
   const pct = (t)=> margin>0 ? (t/margin*100).toFixed(1)+'%' : '0.0%';
+  const mr = (b,br)=> (marginalRate(b,br)*100).toFixed(0)+'%';
+  const soloMR = mr(margin, INCOME_BRACKETS);
+  const corpMR = mr(corpBase, rental?CORP_BRACKETS_RENTAL:CORP_BRACKETS);
+  const salMR = mr(sal.base, INCOME_BRACKETS);
 
   document.getElementById('x_result').innerHTML = `
     <div class="biglabel">세부담 비교 결과</div>
@@ -985,6 +1001,7 @@ function renderCompare(){
       <tr><td>마진 (인건비 차감 전)</td><td>${won(margin)}</td><td>${won(margin)}</td></tr>
       <tr><td>대표자 연봉 (손금)</td>${dash}<td>${won(salary)}</td></tr>
       <tr><td>과세표준</td><td>${won(margin)}</td><td>법인 ${won(corpBase)}<br>근로 ${won(sal.base)}</td></tr>
+      <tr><td>적용 한계세율</td><td>종소 ${soloMR}</td><td>법인 ${corpMR} · 근로 ${salMR}</td></tr>
       <tr><td>종합소득세+지방</td><td>${won(soloTotal)}</td>${dash}</tr>
       <tr><td>법인세+지방 ${rental?'<br>(임대법인 20%~)':''}</td>${dash}<td>${won(corpTotal)}</td></tr>
       <tr class="sub"><td>근로소득공제</td>${dash}<td>-${won(sal.eid)}</td></tr>
@@ -1003,6 +1020,120 @@ function renderCompare(){
 attachComma('x_margin', renderCompare);
 attachComma('x_salary', renderCompare);
 document.getElementById('x_rental').addEventListener('change', renderCompare);
+
+// ===================== 세율 참고표 (각 탭 하단) =====================
+function marginalRate(base, brackets){
+  if(base<=0) return brackets[0].rate;
+  for(const b of brackets){ if(base<=b.limit) return b.rate; }
+}
+function wonShort(n){
+  if(n>=100000000) return (n/100000000).toLocaleString('ko-KR').replace(/\.0$/,'')+'억';
+  return (n/10000).toLocaleString('ko-KR')+'만';
+}
+function bracketRowsHTML(brackets){
+  let prev = 0;
+  return brackets.map(b=>{
+    const label = b.limit===Infinity ? wonShort(prev)+' 초과'
+      : (prev===0 ? wonShort(b.limit)+' 이하' : wonShort(prev)+' 초과 ~ '+wonShort(b.limit));
+    prev = b.limit;
+    return `<tr><td>${label}</td><td>${(b.rate*100).toLocaleString('ko-KR')}%</td><td>${b.deduct?won(b.deduct):'—'}</td></tr>`;
+  }).join('');
+}
+function rateTable(titleOrNull, rowsHTML, cols){
+  cols = cols || ['과세표준','세율','누진공제'];
+  return `${titleOrNull?`<div class="rt-title">${titleOrNull}</div>`:''}
+    <table class="rt"><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr>${rowsHTML}</table>`;
+}
+function rateBox(panelId, summaryLabel, innerHTML, note){
+  document.getElementById('panel-'+panelId).insertAdjacentHTML('beforeend',
+    `<div class="ratebox"><details><summary>${summaryLabel}</summary>${innerHTML}${note?`<div class="rt-note">${note}</div>`:''}</details></div>`);
+}
+
+const HTML_INCOME_TABLE = rateTable('종합소득세 기본세율 (소득세법 §55①)', bracketRowsHTML(INCOME_BRACKETS));
+const HTML_GIFT_TABLE = rateTable('상속·증여세율 (상증법 §26)', bracketRowsHTML(GIFT_BRACKETS));
+
+// 양도세: 기본세율 + 단기·특수 세율
+rateBox('transfer','과표·세율표 보기',
+  HTML_INCOME_TABLE +
+  rateTable('단기양도·특수 세율 (소득세법 §104)', `
+    <tr><td>주택·입주권 1년 미만</td><td>70%</td><td>—</td></tr>
+    <tr><td>주택·입주권 1~2년</td><td>60%</td><td>—</td></tr>
+    <tr><td>분양권 1년 미만</td><td>70%</td><td>—</td></tr>
+    <tr><td>분양권 1년 이상</td><td>60%</td><td>—</td></tr>
+    <tr><td>일반부동산 1년 미만</td><td>50%</td><td>—</td></tr>
+    <tr><td>일반부동산 1~2년</td><td>40%</td><td>—</td></tr>
+    <tr><td>미등기 양도</td><td>70%</td><td>—</td></tr>`, ['구분','세율','비고']),
+  '지방소득세 10% 별도. 조정대상지역 다주택 중과(+20/30%p)는 한시 배제 연장 여부를 양도 시점 기준으로 확인 필요.');
+
+// 종합소득세
+rateBox('income','과표·세율표 보기', HTML_INCOME_TABLE, '지방소득세 10% 별도. 성실신고·세액공제 미반영 기준.');
+
+// 증여세: 세율 + 증여재산공제
+rateBox('gift','과표·세율표 보기',
+  HTML_GIFT_TABLE +
+  rateTable('증여재산공제 (10년 합산, 상증법 §53)', `
+    <tr><td>배우자</td><td colspan="2">6억원</td></tr>
+    <tr><td>직계비속 (성년)</td><td colspan="2">5,000만원</td></tr>
+    <tr><td>직계비속 (미성년)</td><td colspan="2">2,000만원</td></tr>
+    <tr><td>직계존속</td><td colspan="2">5,000만원</td></tr>
+    <tr><td>기타친족 (6촌 이내 혈족 등)</td><td colspan="2">1,000만원</td></tr>
+    <tr><td>혼인·출산 공제 (별도)</td><td colspan="2">1억원</td></tr>`, ['수증자 구분','공제액','']),
+  '세대생략 증여(손자녀 등)는 산출세액의 30%(미성년·20억 초과 40%) 할증.');
+
+// 상속세
+rateBox('inherit','과표·세율표 보기', HTML_GIFT_TABLE,
+  '일괄공제 5억(기초공제+인적공제와 선택), 배우자공제 최소 5억~최대 30억(법정지분 한도), 금융재산공제 최대 2억 별도.');
+
+// 취득세 (주택)
+rateBox('acq','과표·세율표 보기',
+  rateTable('주택 유상취득 세율 (지방세법 §11·§13의2)', `
+    <tr><td>1주택 · 6억 이하</td><td>1%</td><td>—</td></tr>
+    <tr><td>1주택 · 6~9억</td><td>1~3%</td><td>사잇값 산식</td></tr>
+    <tr><td>1주택 · 9억 초과</td><td>3%</td><td>—</td></tr>
+    <tr><td>2주택 (조정지역)</td><td>8%</td><td>비조정은 일반세율</td></tr>
+    <tr><td>3주택 (비조정)</td><td>8%</td><td>—</td></tr>
+    <tr><td>3주택 (조정) · 4주택+ · 법인</td><td>12%</td><td>—</td></tr>`, ['구분','취득세율','비고']) +
+  rateTable('무상취득 (주택)', `
+    <tr><td>증여 (일반)</td><td>3.5%</td><td>—</td></tr>
+    <tr><td>증여 (조정지역 공시 3억 이상)</td><td>12%</td><td>1세대1주택자 증여 등 제외</td></tr>
+    <tr><td>상속 (농지 외)</td><td>2.8%</td><td>무주택 상속 0.8% 특례</td></tr>`, ['구분','취득세율','비고']),
+  '농어촌특별세(85㎡ 초과)·지방교육세 별도 가산. 생애최초 감면(200만 한도) 등 감면 미반영.');
+
+// 부담부증여: 두 세목 결합
+rateBox('burden','과표·세율표 보기', HTML_GIFT_TABLE + HTML_INCOME_TABLE,
+  '채무 인수분은 양도(유상), 나머지는 증여로 이원 과세. 양도분 취득세는 유상세율, 증여분은 무상세율 각각 적용.');
+
+// 재산세
+rateBox('prop','과표·세율표 보기',
+  rateTable('주택 재산세율 (지방세법 §111·§111의2)', `
+    <tr><td>6,000만 이하</td><td>0.1% / 0.05%</td><td>— / —</td></tr>
+    <tr><td>6,000만 ~ 1.5억</td><td>0.15% / 0.1%</td><td>3만 / 3만</td></tr>
+    <tr><td>1.5억 ~ 3억</td><td>0.25% / 0.2%</td><td>18만 / 18만</td></tr>
+    <tr><td>3억 초과</td><td>0.4% / 0.35%</td><td>63만 / 63만</td></tr>`, ['과세표준','표준 / 1주택특례','누진공제']) +
+  rateTable('토지 재산세율', `
+    <tr><td>종합합산 (나대지 등)</td><td>0.2~0.5%</td><td>3구간 누진</td></tr>
+    <tr><td>별도합산 (상가 부속토지)</td><td>0.2~0.4%</td><td>3구간 누진</td></tr>
+    <tr><td>건축물 (일반)</td><td>0.25%</td><td>단일세율</td></tr>`, ['구분','세율','비고']),
+  '1주택 특례세율은 공시 9억 이하만 적용. 공정시장가액비율: 주택 60%(1주택 43~45%), 토지·건축물 70% — 2026년 시행령 기준.');
+
+// 자동차세
+rateBox('car','과표·세율표 보기',
+  rateTable('비영업용 승용 자동차세 (지방세법 §127)', `
+    <tr><td>1,000cc 이하</td><td>cc당 80원</td><td>—</td></tr>
+    <tr><td>1,600cc 이하</td><td>cc당 140원</td><td>—</td></tr>
+    <tr><td>1,600cc 초과</td><td>cc당 200원</td><td>—</td></tr>
+    <tr><td>전기·수소 (그 밖의 승용)</td><td>연 10만원</td><td>정액</td></tr>`, ['배기량','세율','비고']) +
+  rateTable('차령 경감 (시행령 §122의2)', `
+    <tr><td>1~2년</td><td>0%</td><td>—</td></tr>
+    <tr><td>3년차부터</td><td>연 5%씩</td><td>(차령−2)×5%</td></tr>
+    <tr><td>12년 이상</td><td>50%</td><td>최대 한도</td></tr>`, ['차령','경감률','산식']),
+  '지방교육세 30% 가산. 연납 공제율 2026년 3%(미경과분 기준).');
+
+// 개인vs법인: 종소세율 + 법인세율
+rateBox('compare','과표·세율표 보기',
+  HTML_INCOME_TABLE +
+  rateTable('법인세율 — 2026.1.1 이후 개시 사업연도 (법인세법 §55①)', bracketRowsHTML(CORP_BRACKETS)),
+  '성실신고확인대상 소규모 법인(부동산임대업 등)은 최저구간(10%) 배제, 200억 이하 20%. 각 세목에 지방소득세 10% 별도.');
 
 // initial render
 renderTransfer(); renderIncome(); renderGift(); renderInherit(); renderAcq(); renderBurden(); renderProp(); renderCar(); renderCompare();
