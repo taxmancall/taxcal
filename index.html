@@ -248,8 +248,9 @@
         <label>상속인의 상속개시 당시 주택 보유 현황</label>
         <div class="chip-group" id="a_inheritcnt"></div>
       </div>
+      <div class="checkline"><input type="checkbox" id="a_nonhouse"> 주택 외 부동산 (토지·상가·오피스텔 등 — 중과·면적 무관, 농특세 항상 과세)</div>
       <div class="checkline" id="a_adjustedline"><input type="checkbox" id="a_adjusted"> 조정대상지역 소재</div>
-      <div class="checkline"><input type="checkbox" id="a_over85"> 전용면적 85㎡ 초과 (농특세 0.2%p 추가)</div>
+      <div class="checkline" id="a_over85line"><input type="checkbox" id="a_over85"> 전용면적 85㎡ 초과 (85㎡ 이하 주택은 농특세 비과세 — 비수도권 읍·면은 100㎡)</div>
     </div>
     <div class="card result" id="a_result"></div>
   </section>
@@ -282,12 +283,17 @@
         </select>
       </div>
       <div class="row2">
-        <div class="field"><label>보유기간</label><div class="chip-group" id="b_period"></div></div>
-        <div class="field"><label>취득세: 주택 수(유상분)</label><div class="chip-group" id="b_house"></div></div>
+        <div class="field"><label>증여자 보유기간 (양도분 판단)</label><div class="chip-group" id="b_period"></div></div>
+        <div class="field"><label>수증자 주택 수 (취득 후, 유상분 취득세)</label><div class="chip-group" id="b_house"></div></div>
       </div>
-      <div class="checkline"><input type="checkbox" id="b_adjusted"> 조정대상지역 소재</div>
+      <div class="row2" id="b_yearswrap">
+        <div class="field"><label>증여자 보유연수 (장특공제)</label><input type="number" id="b_years" value="10" min="0"></div>
+        <div class="field"><label>증여자 거주연수 (1주택 특례)</label><input type="number" id="b_live" value="0" min="0"></div>
+      </div>
+      <div class="checkline"><input type="checkbox" id="b_onehouse"> 증여자 1세대1주택 비과세 요건 충족 (양도가액 12억 이하분 비과세, 초과분 안분 과세)</div>
+      <div class="checkline"><input type="checkbox" id="b_adjusted"> 조정대상지역 소재 (시가표준액 3억↑ 증여분 취득세 중과)</div>
       <div class="checkline"><input type="checkbox" id="b_over85"> 전용면적 85㎡ 초과</div>
-      <div class="note">채무액 비율만큼은 "양도"(유상이전)로, 나머지는 "증여"로 보아 각각 양도세·증여세를 계산하고, 취득세도 유상분/무상분으로 나누어 합산합니다 (상증세법 §47③, 지방세법 §7·§10의2 취지 반영 간이모델).</div>
+      <div class="note">채무 인수액만큼은 <b>양도</b>(증여자가 양도세 납부), 나머지는 <b>증여</b>(수증자가 증여세 납부)로 보아 구분 과세합니다 (상증법 §47①, 소득세법 §88①). 취득세도 채무분은 유상, 나머지는 무상으로 나누어 수증자가 부담합니다 (지방세법 §7⑪ 단서).</div>
     </div>
     <div class="card result" id="b_result"></div>
   </section>
@@ -479,10 +485,12 @@ function renderTransfer(){
 
   const basicDeduction = 2500000;
   let ltcgRate = 0, ltcgNote='';
-  if(period==='over2' && !multihome){
+  if(period==='over2' && !multihome && years<3){
+    ltcgNote = '보유 3년 미만 — 장기보유특별공제 미적용 (소득세법 §95②)';
+  } else if(period==='over2' && !multihome){
     if(oneHouse){
       const holdPct = Math.min(years*4,40);
-      const livePct = Math.min(liveYears*4,40);
+      const livePct = liveYears>=2 ? Math.min(liveYears*4,40) : 0;
       ltcgRate = (holdPct+livePct)/100;
       ltcgNote = `1세대1주택 특례: 보유 ${holdPct}%p + 거주 ${livePct}%p`;
     } else {
@@ -740,36 +748,37 @@ chipGroup('a_inheritcnt', [
   {value:'3', label:'3주택+'},
 ], 'none', renderAcq);
 
+// 취득세 3요소 분해 — 지방세법 §11·§13의2·§151①1, 농특세법 §5①6
+// 반환: {acq, edu, rural, rate, note}  (각각 과세표준 대비 비율)
+function mkParts(acq, edu, rural, note){ return {acq, edu, rural, rate:acq+edu+rural, note}; }
+
+// 주택 유상취득 (매매)
 function acqRateSale(value, houseCnt, adjusted, over85){
-  // returns {rate, note}
-  if(houseCnt==='1' && !(adjusted)){
-    // 무주택/1주택 일반세율: 6억 이하 1%, 6~9억 구간 누진산식, 9억 초과 3%
-    let base;
-    if(value<=600000000) base=0.01;
-    else if(value<=900000000){
-      const eok = value/100000000;
-      base = (eok*2/3 - 3)/100;
-    } else base=0.03;
-    const extra = over85?0.002:0; // 농특세
-    const localEdu = 0.001*(value<=600000000?1: value<=900000000?2:3); // 지방교육세 근사(세율의 10%수준, 간이)
-    return {rate: base+extra+localEdu, note:'1주택/무주택 일반세율(6~9억 구간 근사 산식 포함)'};
-  }
-  if(houseCnt==='1' && adjusted){
-    // 조정지역 1주택도 일반세율 적용 (중과는 2주택부터)
-    return acqRateSale(value,'1',false,over85);
-  }
-  if(houseCnt==='2'){
-    if(adjusted){
-      return {rate: over85?0.09:0.084, note:'조정대상지역 2주택 중과세율'};
-    }
-    return acqRateSale(value,'1',false,over85);
-  }
-  if(houseCnt==='3'){
-    if(adjusted) return {rate: over85?0.134:0.124, note:'조정대상지역 3주택 중과세율'};
-    return {rate: over85?0.09:0.084, note:'비조정 3주택 중과세율'};
-  }
-  // 4주택+ / 법인
-  return {rate: over85?0.134:0.124, note:'4주택 이상/법인 중과세율'};
+  const R = (r)=> mkParts(r, r*0.1, over85?0.002:0, '');             // §11①8: 교육세 = 세율×50%×20%
+  const H8  = ()=> mkParts(0.08, 0.004, over85?0.006:0, '');          // §13의2 8%: 교육세 (4%−2%)×20%
+  const H12 = ()=> mkParts(0.12, 0.004, over85?0.010:0, '');          // §13의2 12%
+  let r;
+  if(value<=600000000) r=0.01;
+  else if(value<=900000000) r=(value/100000000*2/3 - 3)/100;          // 6~9억: (취득가액×2/3억 − 3) / 100
+  else r=0.03;
+  let p, note;
+  if(houseCnt==='1'){ p=R(r); note='1주택(무주택→1주택) 표준세율 1~3%'; }
+  else if(houseCnt==='2'){ if(adjusted){ p=H8(); note='조정대상지역 2주택 중과 8%'; } else { p=R(r); note='비조정 2주택 — 표준세율'; } }
+  else if(houseCnt==='3'){ if(adjusted){ p=H12(); note='조정대상지역 3주택 중과 12%'; } else { p=H8(); note='비조정 3주택 중과 8%'; } }
+  else { p=H12(); note='4주택 이상·법인 중과 12%'; }
+  p.note=note; return p;
+}
+// 증여(무상) — 주택: 조정지역 공시 3억↑ 중과 12%, 그 외 3.5%
+function acqPartsGift(value, adjusted, over85, nonHouse){
+  if(nonHouse) return mkParts(0.035, 0.003, 0.002, '주택 외 부동산 증여 3.5% (§11①2)');
+  if(adjusted && value>=300000000) return mkParts(0.12, 0.004, over85?0.010:0, '조정대상지역 시가표준액 3억↑ 주택 증여 중과 12% (§13의2②)');
+  return mkParts(0.035, 0.003, over85?0.002:0, '주택 증여 3.5% (§11①2)');
+}
+// 상속
+function acqPartsInherit(inheritCnt, over85, nonHouse){
+  if(nonHouse) return mkParts(0.028, 0.0016, 0.002, '주택 외 부동산 상속 2.8% (§11①1나, 농지는 2.3%)');
+  if(inheritCnt==='none') return mkParts(0.008, 0.0016, 0, '무주택 1가구 상속 특례 0.8% (§15①2, 농특세 비과세·면적 무관)');
+  return mkParts(0.028, 0.0016, over85?0.002:0, '주택 상속 2.8% (§11①1나, 상속은 중과 없음)');
 }
 
 function renderAcq(){
@@ -777,47 +786,37 @@ function renderAcq(){
   const cause = chipVal('a_cause');
   const houseCnt = chipVal('a_house');
   const inheritCnt = chipVal('a_inheritcnt');
+  const nonHouse = document.getElementById('a_nonhouse').checked;
   const adjusted = document.getElementById('a_adjusted').checked;
-  const over85 = document.getElementById('a_over85').checked;
-  document.getElementById('a_housewrap').style.display = cause==='sale' ? 'block':'none';
-  document.getElementById('a_inheritcntwrap').style.display = cause==='inherit' ? 'block':'none';
-  document.getElementById('a_adjustedline').style.display = 'flex';
+  const over85 = document.getElementById('a_over85').checked && !nonHouse;
+  document.getElementById('a_housewrap').style.display = (cause==='sale' && !nonHouse) ? 'block':'none';
+  document.getElementById('a_inheritcntwrap').style.display = (cause==='inherit' && !nonHouse) ? 'block':'none';
+  document.getElementById('a_adjustedline').style.display = (cause!=='inherit' && !nonHouse) ? 'flex':'none';
+  document.getElementById('a_over85line').style.display = nonHouse ? 'none':'flex';
 
-  let rate, note;
-  if(cause==='sale'){
-    const r = acqRateSale(value, houseCnt, adjusted, over85);
-    rate=r.rate; note=r.note;
-  } else if(cause==='gift'){
-    if(adjusted && value>=300000000 && !over85){
-      rate = 0.12; note='조정대상지역 3억 이상 주택 증여 취득세율';
-    } else if(adjusted && value>=300000000 && over85){
-      rate = 0.134; note='조정대상지역 3억 이상 주택 증여 취득세율(85㎡ 초과)';
-    } else {
-      rate = over85?0.04:0.035; note='일반 증여 취득세율';
-    }
-  } else { // inherit
-    if(inheritCnt === 'none') {
-      rate = 0.0096;
-      note = '무주택(1가구 1주택 특례) 상속 취득세율 0.96%';
-    } else {
-      rate = 0.0316;
-      note = '1주택 이상(다주택) 상속 취득세율 3.16%';
-    }
-  }
-  const tax = value*rate;
+  let p;
+  if(cause==='sale') p = nonHouse ? mkParts(0.04, 0.004, 0.002, '주택 외 부동산 유상취득 4% (§11①7나)') : acqRateSale(value, houseCnt, adjusted, over85);
+  else if(cause==='gift') p = acqPartsGift(value, adjusted, over85, nonHouse);
+  else p = acqPartsInherit(inheritCnt, over85, nonHouse);
+
+  const pc = (r)=> (r*100).toFixed(2).replace(/\.?0+$/,'')+'%';
+  const ruralNote = p.rural>0 ? '' : (nonHouse ? '' : (cause==='inherit' && inheritCnt==='none' && !nonHouse ? ' (특례 비과세)' : ' (85㎡ 이하 비과세)'));
   document.getElementById('a_result').innerHTML = `
-    <div class="biglabel">예상 취득세 등 총액 (농특세·지방교육세 포함)</div>
-    <div class="big">${won(tax)}</div>
-    <div class="breakdown">
-      <div><span>취득가액</span><b>${won(value)}</b></div>
-      <div><span>적용세율</span><b>${(rate*100).toFixed(2)}%</b></div>
-      <div><span>적용구분</span><b>${note}</b></div>
-    </div>
-    <div class="note">6~9억 구간 유상취득 세율은 근사 산식이며, 정확한 세액은 지방세법 시행령 별표 및 위택스 계산기로 재확인 권장.</div>
+    <div class="biglabel">예상 취득세 등 총액 (취득세 + 지방교육세 + 농어촌특별세)</div>
+    <div class="big">${won(value*p.rate)}</div>
+    <table class="cmp">
+      <tr><th style="text-align:left;">세목</th><th>세율</th><th>세액</th></tr>
+      <tr><td>취득세</td><td>${pc(p.acq)}</td><td>${won(value*p.acq)}</td></tr>
+      <tr><td>지방교육세</td><td>${pc(p.edu)}</td><td>${won(value*p.edu)}</td></tr>
+      <tr><td>농어촌특별세${ruralNote}</td><td>${pc(p.rural)}</td><td>${won(value*p.rural)}</td></tr>
+      <tr class="total"><td>합계</td><td>${pc(p.rate)}</td><td>${won(value*p.rate)}</td></tr>
+    </table>
+    <div class="breakdown"><div><span>적용구분</span><b>${p.note}</b></div></div>
+    <div class="note">지방교육세: (표준세율 − 2%) × 20% [유상주택은 세율 × 10%, 중과는 (4%−2%)×20% = 0.4%] (지방세법 §151①1). 농어촌특별세: 2% 기준 취득세액의 10% = 0.2% [중과 8%→0.6%, 12%→1.0%], 85㎡ 이하 주택 비과세 (농특세법 §4·§5). 6~9억 유상주택 세율은 (취득가액×2/3억 − 3)% 산식. 감면(생애최초 등) 미반영.</div>
   `;
 }
 attachComma('a_value', renderAcq);
-['a_adjusted','a_over85','a_inheritcnt'].forEach(id=>{
+['a_adjusted','a_over85','a_nonhouse'].forEach(id=>{
   document.getElementById(id).addEventListener('input', renderAcq);
   document.getElementById(id).addEventListener('change', renderAcq);
 });
@@ -837,72 +836,100 @@ chipGroup('b_house', [
 
 function renderBurden(){
   const asset = numVal('b_asset');
-  const debt = numVal('b_debt');
+  const debt = Math.min(numVal('b_debt'), asset);
   const acq = numVal('b_acq');
   const relation = document.getElementById('b_relation').value;
   const period = chipVal('b_period');
   const houseCnt = chipVal('b_house');
+  const years = Number(document.getElementById('b_years').value)||0;
+  const live = Number(document.getElementById('b_live').value)||0;
+  const oneHouse = document.getElementById('b_onehouse').checked;
   const adjusted = document.getElementById('b_adjusted').checked;
   const over85 = document.getElementById('b_over85').checked;
+  document.getElementById('b_yearswrap').style.display = period==='over2' ? 'grid':'none';
 
-  const debtRatio = asset>0 ? Math.min(debt/asset,1) : 0;
-  const giftPortion = asset - debt; // 순수 증여분
-  const salePortion = debt; // 유상양도로 보는 부분(양도가액)
+  const ratio = asset>0 ? debt/asset : 0;     // 채무인수비율
+  const giftAmt = asset - debt;               // 증여분
+  const saleAmt = debt;                       // 양도분 (양도가액 = 인수채무)
 
-  // 증여세
-  const deduction = GIFT_DEDUCTIONS[relation];
-  const giftBase = Math.max(giftPortion-deduction,0);
-  const giftTax = calcProgressive(giftBase, GIFT_BRACKETS);
-  const giftCredit = giftTax*0.03;
-  const giftFinal = giftTax-giftCredit;
+  // ===== A. 증여분 — 수증자 증여세 =====
+  const gDed = GIFT_DEDUCTIONS[relation];
+  const gBase = Math.max(giftAmt - gDed, 0);
+  const gTax = calcProgressive(gBase, GIFT_BRACKETS);
+  const gCredit = gTax*0.03;
+  const gFinal = gTax - gCredit;
+  const gMR = gBase>0 ? (()=>{for(const b of GIFT_BRACKETS){ if(gBase<=b.limit) return b.rate; }})() : 0;
 
-  // 양도세 (채무 인수액 상당 부분)
-  const gain = Math.max(salePortion - acq*debtRatio, 0);
-  const basicDeduction = 2500000;
-  let ltcgPct = 0;
-  if(period==='over2'){ ltcgPct = Math.min( (Number(document.getElementById('b_years')?.value)||0) ,0); }
-  // 간이: 부담부증여 양도분은 통상 보유기간 길어도 사용자가 별도 확인 필요 → 여기서는 기본세율/단기세율만 반영, 장특공제는 0으로 보수적 처리
-  const taxBase = Math.max(gain-basicDeduction,0);
-  let transferTax=0, rNote='';
-  if(period==='under1'){ transferTax=taxBase*0.5; rNote='단기세율 50%'; }
-  else if(period==='under2'){ transferTax=taxBase*0.4; rNote='단기세율 40%'; }
-  else { transferTax=calcProgressive(taxBase, INCOME_BRACKETS); rNote='기본세율(장특공제 미반영·보수적)'; }
-  const transferLocal = transferTax*0.1;
-  const transferFinal = transferTax+transferLocal;
+  // ===== B. 양도분 — 증여자 양도소득세 =====
+  const acqAlloc = acq*ratio;                 // 취득가액 안분 (취득가액 × 채무/시가)
+  let gain = Math.max(saleAmt - acqAlloc, 0);
+  let taxableGain = gain, ohNote='';
+  // 1세대1주택 비과세: 2년 이상 보유, 실지양도가액(전체 시가 기준) 12억 초과분만 과세 (소득세법 §89①3, §95③)
+  if(oneHouse && period==='over2'){
+    if(asset<=1200000000){ taxableGain=0; ohNote='1세대1주택 비과세 (12억 이하)'; }
+    else { taxableGain = gain*(asset-1200000000)/asset; ohNote=`고가주택 12억 초과분 안분 (${((asset-1200000000)/asset*100).toFixed(1)}%)`; }
+  }
+  // 장기보유특별공제 (소득세법 §95②): 3년 이상 보유부터
+  let ltcg=0, ltcgNote='보유 3년 미만 — 미적용';
+  if(period==='over2' && years>=3){
+    if(oneHouse){
+      const hp=Math.min(years*4,40), lp = live>=2 ? Math.min(live*4,40) : 0;
+      ltcg=(hp+lp)/100; ltcgNote=`1주택 특례 보유 ${hp}% + 거주 ${lp}%`;
+    } else { ltcg=Math.min(years*2,30)/100; ltcgNote=`일반 ${Math.min(years*2,30)}% (연 2%, 최대 30%)`; }
+  }
+  const afterLtcg = taxableGain*(1-ltcg);
+  const tBase = Math.max(afterLtcg - 2500000, 0);
+  let tTax, tRate;
+  if(period==='under1'){ tTax=tBase*0.7; tRate='단기 70% (주택 1년 미만)'; }
+  else if(period==='under2'){ tTax=tBase*0.6; tRate='단기 60% (주택 1~2년)'; }
+  else { tTax=calcProgressive(tBase, INCOME_BRACKETS); const b=INCOME_BRACKETS.find(x=>tBase<=x.limit); tRate=`기본세율 ${tBase>0?(b.rate*100)+'%':'—'}`; }
+  const tFinal = tTax*1.1;
 
-  // 취득세: 유상분(채무비율) + 무상분(증여비율)
-  const saleValuePortion = asset*debtRatio;
-  const giftValuePortion = asset*(1-debtRatio);
-  const saleRateInfo = acqRateSale(saleValuePortion, houseCnt, adjusted, over85);
-  let giftRate;
-  if(adjusted && giftValuePortion>=300000000){ giftRate = over85?0.134:0.12; }
-  else { giftRate = over85?0.04:0.035; }
-  const acqSaleTax = saleValuePortion*saleRateInfo.rate;
-  const acqGiftTax = giftValuePortion*giftRate;
-  const acqTotal = acqSaleTax+acqGiftTax;
+  // ===== C. 취득세 — 수증자 (유상분 + 무상분) =====
+  const sp = acqRateSale(asset, houseCnt, adjusted, over85);          // 세율 판단은 주택 전체 가액 기준
+  const gp = acqPartsGift(asset, adjusted, over85, false);             // 중과 3억 기준도 전체 시가표준액
+  const acqSale = saleAmt*sp.rate, acqGift = giftAmt*gp.rate;
+  const pc = (r)=> (r*100).toFixed(2).replace(/\.?0+$/,'')+'%';
 
-  const grandTotal = giftFinal+transferFinal+acqTotal;
+  const donee = gFinal + acqSale + acqGift;   // 수증자 부담
+  const donor = tFinal;                       // 증여자 부담
+  const grand = donee + donor;
+
+  // 비교: 전액 일반 증여 시 (수증자 증여세 + 무상 취득세)
+  const pureBase = Math.max(asset - gDed, 0);
+  const pureTax = calcProgressive(pureBase, GIFT_BRACKETS)*0.97 + asset*gp.rate;
+  const diff = pureTax - grand;
 
   document.getElementById('b_result').innerHTML = `
-    <div class="biglabel">예상 총 부담세액 (증여세 + 양도세 + 취득세)</div>
-    <div class="big">${won(grandTotal)}</div>
-    <div class="sumline"><span>① 증여세 (순수증여분 ${won(giftPortion)})</span><span>${won(giftFinal)}</span></div>
-    <div class="sumline"><span>② 양도소득세 (채무인수분 ${won(salePortion)}, ${rNote})</span><span>${won(transferFinal)}</span></div>
-    <div class="sumline"><span>③ 취득세 등 (유상분+무상분 합산)</span><span>${won(acqTotal)}</span></div>
-    <div class="sumline sumtotal"><span>합계</span><span>${won(grandTotal)}</span></div>
-    <div class="breakdown" style="margin-top:12px;">
-      <div><span>채무인수비율</span><b>${(debtRatio*100).toFixed(1)}%</b></div>
-      <div><span>양도차익(안분 취득가 반영)</span><b>${won(gain)}</b></div>
-      <div><span>취득세 - 유상분(${won(saleValuePortion)})</span><b>${(saleRateInfo.rate*100).toFixed(2)}% → ${won(acqSaleTax)}</b></div>
-      <div><span>취득세 - 무상분(${won(giftValuePortion)})</span><b>${(giftRate*100).toFixed(2)}% → ${won(acqGiftTax)}</b></div>
-    </div>
-    <div class="note">장기보유특별공제는 보수적으로 미반영했습니다(실제로는 보유연수에 따라 양도세가 더 낮아질 수 있음). 채무는 반드시 임대차계약서·대출서류 등으로 객관적 입증이 가능해야 채무 인수로 인정됩니다(상증세법 §47③, 시행령 §36).</div>
+    <div class="biglabel">부담부증여 총 세부담 (증여자 + 수증자)</div>
+    <div class="big">${won(grand)}</div>
+    <table class="cmp">
+      <tr><th style="text-align:left;">구분</th><th>증여분<br><span style="font-weight:400;font-size:10.5px;">수증자 납부</span></th><th>양도분 (채무인수)<br><span style="font-weight:400;font-size:10.5px;">증여자 납부</span></th></tr>
+      <tr><td>대상가액</td><td>${won(giftAmt)}</td><td>${won(saleAmt)}</td></tr>
+      <tr><td>비율</td><td>${((1-ratio)*100).toFixed(1)}%</td><td>${(ratio*100).toFixed(1)}%</td></tr>
+      <tr class="sub"><td>공제 / 필요경비</td><td>증여재산공제 −${won(gDed)}</td><td>안분 취득가액 −${won(acqAlloc)}</td></tr>
+      <tr class="sub"><td>양도차익</td><td class="dim">—</td><td>${won(gain)}${ohNote?`<br><span style="font-size:10.5px;">${ohNote} → ${won(taxableGain)}</span>`:''}</td></tr>
+      <tr class="sub"><td>장기보유특별공제</td><td class="dim">—</td><td>${ltcgNote}${ltcg>0?`<br>−${won(taxableGain*ltcg)}`:''}</td></tr>
+      <tr class="sub"><td>기본공제</td><td class="dim">—</td><td>−2,500,000원</td></tr>
+      <tr><td>과세표준</td><td>${won(gBase)}</td><td>${won(tBase)}</td></tr>
+      <tr><td>적용세율</td><td>${gMR?(gMR*100)+'% (누진)':'—'}</td><td>${tRate}</td></tr>
+      <tr><td>산출세액</td><td>${won(gTax)}</td><td>${won(tTax)}</td></tr>
+      <tr class="sub"><td>신고세액공제 / 지방소득세</td><td>−${won(gCredit)} (3%)</td><td>+${won(tTax*0.1)} (10%)</td></tr>
+      <tr><td><b>증여세 / 양도세</b></td><td><b>${won(gFinal)}</b></td><td><b>${won(tFinal)}</b></td></tr>
+      <tr><td>취득세 등 (수증자)</td><td>무상 ${pc(gp.rate)}<br>${won(acqGift)}</td><td>유상 ${pc(sp.rate)}<br>${won(acqSale)}</td></tr>
+      <tr class="total"><td>납세자별 부담</td><td>수증자 ${won(donee)}</td><td>증여자 ${won(donor)}</td></tr>
+    </table>
+    <div class="divider"></div>
+    <div class="sumline"><span>같은 자산 <b>전액 일반 증여</b> 시 (증여세+무상 취득세)</span><span>${won(pureTax)}</span></div>
+    <div class="sumline"><span><b>부담부증여 ${diff>=0?'절감':'추가 부담'}</b></span><span><b style="color:${diff>=0?'var(--teal)':'var(--warn)'}">${won(Math.abs(diff))}</b></span></div>
+    <div class="note">취득세 세부: 무상분 ${gp.note} — 취득세 ${pc(gp.acq)} + 교육세 ${pc(gp.edu)} + 농특세 ${pc(gp.rural)} / 유상분 ${sp.note} — 취득세 ${pc(sp.acq)} + 교육세 ${pc(sp.edu)} + 농특세 ${pc(sp.rural)}.</div>
+    <div class="note">양도세는 <b>증여자</b>의 납세의무입니다(수증자가 대신 내면 그 금액도 추가 증여). 다주택 중과(한시 배제 여부)는 미반영. 인수채무는 임대차계약서·대출서류로 객관적 입증이 되어야 하며, 직계존비속·배우자 간에는 채무 인수가 추정되지 않아 입증 책임이 납세자에게 있고 사후관리(채무 상환자금 출처) 대상입니다(상증법 §47③, 시행령 §36·§10). 양도분 취득가액이 불분명하면 기준시가 비율 안분 등 별도 검토 필요.</div>
   `;
 }
 attachComma('b_asset', renderBurden);
 attachComma('b_debt', renderBurden);
 attachComma('b_acq', renderBurden);
-['b_relation','b_adjusted','b_over85'].forEach(id=>{
+['b_relation','b_adjusted','b_over85','b_onehouse','b_years','b_live'].forEach(id=>{
   document.getElementById(id).addEventListener('input', renderBurden);
   document.getElementById(id).addEventListener('change', renderBurden);
 });
@@ -1264,12 +1291,15 @@ rateBox('acq','과표·세율표 보기',
     <tr><td>2주택 (조정지역)</td><td>8%</td><td>비조정은 일반세율</td></tr>
     <tr><td>3주택 (비조정)</td><td>8%</td><td>—</td></tr>
     <tr><td>3주택 (조정) · 4주택+ · 법인</td><td>12%</td><td>—</td></tr>`, ['구분','취득세율','비고']) +
-  rateTable('무상취득 (주택)', `
-    <tr><td>증여 (일반)</td><td>3.5%</td><td>—</td></tr>
-    <tr><td>증여 (조정지역 공시 3억 이상)</td><td>12%</td><td>1세대1주택자 증여 등 제외</td></tr>
-    <tr><td>상속 (무주택 상속)</td><td>0.96%</td><td>상속인 무주택 시</td></tr>
-    <tr><td>상속 (다주택 상속)</td><td>3.16%</td><td>상속인 1주택 이상 보유 시</td></tr>`, ['구분','취득세율','비고']),
-  '농어촌특별세(85㎡ 초과)·지방교육세 별도 가산. 생애최초 감면(200만 한도) 등 감면 미반영.');
+  rateTable('무상취득·주택 외 — 합계세율 (취득세+교육세+농특세)', `
+    <tr><td>주택 증여 (일반)</td><td>3.5%</td><td>85㎡ 이하 3.8% / 초과 4.0%</td></tr>
+    <tr><td>주택 증여 (조정 3억↑ 중과)</td><td>12%</td><td>85㎡ 이하 12.4% / 초과 13.4%</td></tr>
+    <tr><td>주택 상속 (무주택 특례)</td><td>0.8%</td><td>0.96% (면적 무관)</td></tr>
+    <tr><td>주택 상속 (일반)</td><td>2.8%</td><td>85㎡ 이하 2.96% / 초과 3.16%</td></tr>
+    <tr><td>토지·상가 등 증여</td><td>3.5%</td><td>4.0%</td></tr>
+    <tr><td>토지·상가 등 상속</td><td>2.8%</td><td>3.16% (농지 2.56%)</td></tr>
+    <tr><td>토지·상가 등 매매</td><td>4%</td><td>4.6%</td></tr>`, ['구분','취득세율','합계 (부가세 포함)']),
+  '지방교육세 = (표준세율 − 2%) × 20% [유상주택 세율×10%, 중과 0.4%] (지방세법 §151①1). 농특세 = 0.2% [중과 8%→0.6%, 12%→1.0%], 85㎡ 이하 주택 비과세 (농특세법 §4 11호·§5①6). 생애최초 감면 등 미반영.');
 
 // 부담부증여: 두 세목 결합
 rateBox('burden','과표·세율표 보기', HTML_GIFT_TABLE + HTML_INCOME_TABLE,
