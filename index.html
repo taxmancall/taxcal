@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- taxcal v1.1 (2026-10-30) — 부담부증여 탭: 주택/상가·주택외 자산유형 구분 추가 -->
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
@@ -260,6 +261,10 @@
     <div class="card">
       <h2>부담부증여 (증여재산에 담보된 채무 인수 포함)</h2>
       <div class="field">
+        <label>자산 유형</label>
+        <div class="chip-group" id="b_type"></div>
+      </div>
+      <div class="field">
         <label>증여 대상 자산 시가(=취득세 과세표준)</label>
         <input type="text" inputmode="numeric" id="b_asset" value="1000000000">
       </div>
@@ -284,15 +289,15 @@
       </div>
       <div class="row2">
         <div class="field"><label>증여자 보유기간 (양도분 판단)</label><div class="chip-group" id="b_period"></div></div>
-        <div class="field"><label>수증자 주택 수 (취득 후, 유상분 취득세)</label><div class="chip-group" id="b_house"></div></div>
+        <div class="field" id="b_housefield"><label>수증자 주택 수 (취득 후, 유상분 취득세)</label><div class="chip-group" id="b_house"></div></div>
       </div>
       <div class="row2" id="b_yearswrap">
         <div class="field"><label>증여자 보유연수 (장특공제)</label><input type="number" id="b_years" value="10" min="0"></div>
-        <div class="field"><label>증여자 거주연수 (1주택 특례)</label><input type="number" id="b_live" value="0" min="0"></div>
+        <div class="field" id="b_livefield"><label>증여자 거주연수 (1주택 특례)</label><input type="number" id="b_live" value="0" min="0"></div>
       </div>
-      <div class="checkline"><input type="checkbox" id="b_onehouse"> 증여자 1세대1주택 비과세 요건 충족 (양도가액 12억 이하분 비과세, 초과분 안분 과세)</div>
-      <div class="checkline"><input type="checkbox" id="b_adjusted"> 조정대상지역 소재 (시가표준액 3억↑ 증여분 취득세 중과)</div>
-      <div class="checkline"><input type="checkbox" id="b_over85"> 전용면적 85㎡ 초과</div>
+      <div class="checkline" id="b_oneline"><input type="checkbox" id="b_onehouse"> 증여자 1세대1주택 비과세 요건 충족 (양도가액 12억 이하분 비과세, 초과분 안분 과세)</div>
+      <div class="checkline" id="b_adjline"><input type="checkbox" id="b_adjusted"> 조정대상지역 소재 (시가표준액 3억↑ 증여분 취득세 중과)</div>
+      <div class="checkline" id="b_85line"><input type="checkbox" id="b_over85"> 전용면적 85㎡ 초과</div>
       <div class="note">채무 인수액만큼은 <b>양도</b>(증여자가 양도세 납부), 나머지는 <b>증여</b>(수증자가 증여세 납부)로 보아 구분 과세합니다 (상증법 §47①, 소득세법 §88①). 취득세도 채무분은 유상, 나머지는 무상으로 나누어 수증자가 부담합니다 (지방세법 §7⑪ 단서).</div>
     </div>
     <div class="card result" id="b_result"></div>
@@ -822,6 +827,10 @@ attachComma('a_value', renderAcq);
 });
 
 // ===================== 부담부증여 =====================
+chipGroup('b_type', [
+  {value:'house', label:'주택'},
+  {value:'nonhouse', label:'상가·주택 외'},
+], 'house', renderBurden);
 chipGroup('b_period', [
   {value:'under1', label:'1년 미만'},
   {value:'under2', label:'1~2년'},
@@ -835,6 +844,7 @@ chipGroup('b_house', [
 ], '1', renderBurden);
 
 function renderBurden(){
+  const isHouse = chipVal('b_type')==='house';
   const asset = numVal('b_asset');
   const debt = Math.min(numVal('b_debt'), asset);
   const acq = numVal('b_acq');
@@ -843,10 +853,16 @@ function renderBurden(){
   const houseCnt = chipVal('b_house');
   const years = Number(document.getElementById('b_years').value)||0;
   const live = Number(document.getElementById('b_live').value)||0;
-  const oneHouse = document.getElementById('b_onehouse').checked;
+  const oneHouse = isHouse && document.getElementById('b_onehouse').checked;
   const adjusted = document.getElementById('b_adjusted').checked;
   const over85 = document.getElementById('b_over85').checked;
   document.getElementById('b_yearswrap').style.display = period==='over2' ? 'grid':'none';
+  // 주택 전용 입력 토글 (상가·주택 외 선택 시 숨김)
+  document.getElementById('b_housefield').style.display = isHouse ? 'block':'none';
+  document.getElementById('b_livefield').style.display = isHouse ? 'block':'none';
+  ['b_oneline','b_adjline','b_85line'].forEach(id=>{
+    document.getElementById(id).style.display = isHouse ? 'flex':'none';
+  });
 
   const ratio = asset>0 ? debt/asset : 0;     // 채무인수비율
   const giftAmt = asset - debt;               // 증여분
@@ -880,14 +896,17 @@ function renderBurden(){
   const afterLtcg = taxableGain*(1-ltcg);
   const tBase = Math.max(afterLtcg - 2500000, 0);
   let tTax, tRate;
-  if(period==='under1'){ tTax=tBase*0.7; tRate='단기 70% (주택 1년 미만)'; }
-  else if(period==='under2'){ tTax=tBase*0.6; tRate='단기 60% (주택 1~2년)'; }
+  // 단기세율: 주택·입주권·분양권 70%/60%, 그 외 부동산 50%/40% (소득세법 §104①2·3)
+  if(period==='under1'){ const r=isHouse?0.7:0.5; tTax=tBase*r; tRate=`단기 ${r*100}% (${isHouse?'주택':'주택 외 부동산'} 1년 미만)`; }
+  else if(period==='under2'){ const r=isHouse?0.6:0.4; tTax=tBase*r; tRate=`단기 ${r*100}% (${isHouse?'주택':'주택 외 부동산'} 1~2년)`; }
   else { tTax=calcProgressive(tBase, INCOME_BRACKETS); const b=INCOME_BRACKETS.find(x=>tBase<=x.limit); tRate=`기본세율 ${tBase>0?(b.rate*100)+'%':'—'}`; }
   const tFinal = tTax*1.1;
 
   // ===== C. 취득세 — 수증자 (유상분 + 무상분) =====
-  const sp = acqRateSale(asset, houseCnt, adjusted, over85);          // 세율 판단은 주택 전체 가액 기준
-  const gp = acqPartsGift(asset, adjusted, over85, false);             // 중과 3억 기준도 전체 시가표준액
+  // 주택: 유상 1~3%/중과, 무상 3.5%/조정 3억↑ 12% — 상가·주택 외: 유상 4%(§11①7나), 무상 3.5%(§11①2), 중과 없음
+  const sp = isHouse ? acqRateSale(asset, houseCnt, adjusted, over85)  // 세율 판단은 주택 전체 가액 기준
+                     : mkParts(0.04, 0.004, 0.002, '주택 외 부동산 유상취득 4% (§11①7나)');
+  const gp = acqPartsGift(asset, adjusted, over85, !isHouse);          // 중과 3억 기준도 전체 시가표준액
   const acqSale = saleAmt*sp.rate, acqGift = giftAmt*gp.rate;
   const pc = (r)=> (r*100).toFixed(2).replace(/\.?0+$/,'')+'%';
 
@@ -923,7 +942,11 @@ function renderBurden(){
     <div class="sumline"><span>같은 자산 <b>전액 일반 증여</b> 시 (증여세+무상 취득세)</span><span>${won(pureTax)}</span></div>
     <div class="sumline"><span><b>부담부증여 ${diff>=0?'절감':'추가 부담'}</b></span><span><b style="color:${diff>=0?'var(--teal)':'var(--warn)'}">${won(Math.abs(diff))}</b></span></div>
     <div class="note">취득세 세부: 무상분 ${gp.note} — 취득세 ${pc(gp.acq)} + 교육세 ${pc(gp.edu)} + 농특세 ${pc(gp.rural)} / 유상분 ${sp.note} — 취득세 ${pc(sp.acq)} + 교육세 ${pc(sp.edu)} + 농특세 ${pc(sp.rural)}.</div>
-    <div class="note">양도세는 <b>증여자</b>의 납세의무입니다(수증자가 대신 내면 그 금액도 추가 증여). 다주택 중과(한시 배제 여부)는 미반영. 인수채무는 임대차계약서·대출서류로 객관적 입증이 되어야 하며, 직계존비속·배우자 간에는 채무 인수가 추정되지 않아 입증 책임이 납세자에게 있고 사후관리(채무 상환자금 출처) 대상입니다(상증법 §47③, 시행령 §36·§10). 양도분 취득가액이 불분명하면 기준시가 비율 안분 등 별도 검토 필요.</div>
+    <div class="note">양도세는 <b>증여자</b>의 납세의무입니다(수증자가 대신 내면 그 금액도 추가 증여). ${isHouse?'다주택 중과(한시 배제 여부)는 미반영. ':''}인수채무는 임대차계약서·대출서류로 객관적 입증이 되어야 하며, 직계존비속·배우자 간에는 채무 인수가 추정되지 않아 입증 책임이 납세자에게 있고 사후관리(채무 상환자금 출처) 대상입니다(상증법 §47③, 시행령 §36·§10). 양도분 취득가액이 불분명하면 기준시가 비율 안분 등 별도 검토 필요.</div>
+    ${isHouse?'':`
+    <div class="note" style="background:var(--warn-bg);"><b>상가 부담부증여 체크포인트</b><br>
+    ① <b>부가가치세</b> — 증여자가 일반과세 사업자(상가 임대 등)이면 채무인수분(유상 양도분)은 재화의 공급에 해당하여 <b>건물분 부가세 10%</b>가 과세될 수 있습니다(토지분은 면세). 임대사업 전체를 포괄적으로 승계하면 재화의 공급으로 보지 않으나(부가세법 §10⑨2 사업양도), 요건 충족 여부(임차인·보증금·사업 동일성 유지 등)를 사전 검토해야 합니다.<br>
+    ② <b>재산 평가</b> — 저당권·임대보증금이 있는 재산은 Max(평가액, 담보 채무액)으로 평가합니다(상증법 §66). 상가는 매매사례가액이 드물어 기준시가·임대료 등 환산가액(상증법 §61⑤)·감정평가액 중 어느 가액이 적용되는지에 따라 세액이 크게 달라지며, 기준시가 신고 시 국세청 감정평가 사업 대상이 될 수 있습니다.</div>`}
   `;
 }
 attachComma('b_asset', renderBurden);
