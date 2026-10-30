@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- taxcal v1.1 (2026-10-30) — 부담부증여 탭: 주택/상가·주택외 자산유형 구분 추가 -->
+<!-- taxcal v1.2 (2026-10-30) — 증여세 탭: 재산 유형(현금/주택/상가) 선택 시 취득세 합산 총 부담 표시 / v1.1 부담부증여 주택·상가 구분 -->
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
@@ -167,6 +167,10 @@
         <label id="g_valuelabel">증여재산가액</label>
         <input type="text" inputmode="numeric" id="g_value" value="100000000">
       </div>
+      <div class="field" id="g_assetwrap">
+        <label>재산 유형 (부동산이면 취득세 합산 표시)</label>
+        <div class="chip-group" id="g_asset"></div>
+      </div>
       <div class="field" id="g_relwrap">
         <label>증여자와의 관계 (10년 합산 공제한도 자동 적용)</label>
         <select id="g_relation">
@@ -178,6 +182,8 @@
           <option value="none">그 외 (공제 없음)</option>
         </select>
       </div>
+      <div class="checkline" id="g_adjline" style="display:none;"><input type="checkbox" id="g_adj"> 조정대상지역 소재 (시가표준액 3억↑ 주택 증여 취득세 중과 12%)</div>
+      <div class="checkline" id="g_85line" style="display:none;"><input type="checkbox" id="g_85"> 전용면적 85㎡ 초과</div>
       <div class="checkline" id="g_skipline"><input type="checkbox" id="g_skip"> 세대생략 증여 (조부모 → 손자녀 등, 자녀 아닌 직계비속)</div>
       <div class="checkline" id="g_hireline" style="display:none;"><input type="checkbox" id="g_hire10"> 창업으로 10명 이상 신규 고용 (한도 50억 → 100억)</div>
       <div class="checkline" id="g_reportline"><input type="checkbox" id="g_report"> 신고기한 내 자진신고 (신고세액공제 3%)</div>
@@ -574,6 +580,11 @@ chipGroup('g_mode', [
   {value:'normal', label:'일반 증여'},
   {value:'startup', label:'창업자금 특례 (조특법 §30의5)'},
 ], 'normal', renderGift);
+chipGroup('g_asset', [
+  {value:'cash', label:'현금·금융'},
+  {value:'house', label:'주택'},
+  {value:'nonhouse', label:'상가·주택 외'},
+], 'cash', renderGift);
 
 function renderGift(){
   const mode = chipVal('g_mode');
@@ -584,12 +595,18 @@ function renderGift(){
 
   // 모드별 UI 전환
   const isStartup = mode==='startup';
+  const assetType = chipVal('g_asset');
+  const isRealty = !isStartup && assetType!=='cash';
+  const isGHouse = assetType==='house';
   document.getElementById('g_relwrap').style.display = isStartup?'none':'block';
   document.getElementById('g_skipline').style.display = (!isStartup && isDesc) ? 'flex':'none';
   document.getElementById('g_hireline').style.display = isStartup?'flex':'none';
   document.getElementById('g_reportline').style.display = isStartup?'none':'flex';
   document.getElementById('g_startupreq').style.display = isStartup?'block':'none';
   document.getElementById('g_valuelabel').textContent = isStartup?'창업자금 증여액 (현금·예금 등)':'증여재산가액';
+  document.getElementById('g_assetwrap').style.display = isStartup?'none':'block';
+  document.getElementById('g_adjline').style.display = (isRealty && isGHouse) ? 'flex':'none';
+  document.getElementById('g_85line').style.display = (isRealty && isGHouse) ? 'flex':'none';
 
   if(isStartup){ renderGiftStartup(value); return; }
 
@@ -602,18 +619,39 @@ function renderGift(){
   const surtax = tax * skipRate;
   const credit = report ? (tax+surtax)*0.03 : 0;
   const total = tax+surtax-credit;
+
+  // 부동산 증여: 취득세 등 합산 (주택: 3.5%/조정 3억↑ 12% — 상가·주택 외: 3.5%, §11①2)
+  let acqHtml='', acqSum='', grandTotal=total, bigLabel='예상 납부세액';
+  if(isRealty){
+    const adj = document.getElementById('g_adj').checked;
+    const o85 = document.getElementById('g_85').checked;
+    const gp = acqPartsGift(value, adj, o85, !isGHouse);
+    const acqTotal = value*gp.rate;
+    grandTotal = total + acqTotal;
+    bigLabel = '예상 총 부담 (증여세 + 취득세 등)';
+    const pc = (r)=> (r*100).toFixed(2).replace(/\.?0+$/,'')+'%';
+    acqHtml = `
+      <div><span>취득세 등 (${gp.note})</span><b>+${won(acqTotal)}</b></div>`;
+    acqSum = `
+    <div class="divider"></div>
+    <div class="sumline"><span>증여세 (국세)</span><span>${won(total)}</span></div>
+    <div class="sumline"><span>취득세 등 (지방세·농특세)</span><span>${won(acqTotal)}</span></div>
+    <div class="sumline"><span><b>총 부담</b></span><span><b>${won(grandTotal)}</b></span></div>
+    <div class="note">취득세 세부: ${gp.note} — 취득세 ${pc(gp.acq)} + 지방교육세 ${pc(gp.edu)} + 농특세 ${pc(gp.rural)}. 취득세 과세표준은 <b>시가인정액</b>(지방세법 §10의2, 시가표준액 1억 이하는 선택 가능)이며, 여기서는 증여재산가액과 동일하다고 가정했습니다. 취득세는 취득일(증여계약일)이 속하는 달의 말일부터 3개월 이내 신고·납부.</div>`;
+  }
+
   document.getElementById('g_result').innerHTML = `
-    <div class="biglabel">예상 납부세액</div>
-    <div class="big">${won(total)}</div>
+    <div class="biglabel">${bigLabel}</div>
+    <div class="big">${won(grandTotal)}</div>
     <div class="breakdown">
       <div><span>증여재산가액</span><b>${won(value)}</b></div>
       <div><span>증여재산공제</span><b>-${won(deduction)}</b></div>
       <div><span>과세표준</span><b>${won(base)}</b></div>
       <div><span>산출세액</span><b>${won(tax)}</b></div>
       ${skip?`<div><span>세대생략 할증(${skipRate*100}%)</span><b>+${won(surtax)}</b></div>`:''}
-      <div><span>신고세액공제(3%)</span><b>-${won(credit)}</b></div>
-    </div>
-    <div class="note">10년 이내 동일인(직계존속은 부모 합산)으로부터 받은 증여재산은 합산 과세되며, 공제도 10년간 1회 한도입니다. 혼인·출산 증여재산공제(1억, 별도 요건) 등 특례는 미반영.${skip?' 세대생략 할증은 자녀가 이미 사망하여 손자녀가 대신 증여받는 경우(대습)에는 적용되지 않습니다(상증법 §57 단서).':''}</div>
+      <div><span>신고세액공제(3%)</span><b>-${won(credit)}</b></div>${acqHtml}
+    </div>${acqSum}
+    <div class="note">10년 이내 동일인(직계존속은 부모 합산)으로부터 받은 증여재산은 합산 과세되며, 공제도 10년간 1회 한도입니다. 혼인·출산 증여재산공제(1억, 별도 요건) 등 특례는 미반영.${skip?' 세대생략 할증은 자녀가 이미 사망하여 손자녀가 대신 증여받는 경우(대습)에는 적용되지 않습니다(상증법 §57 단서).':''}${isRealty?' 채무(전세보증금·대출)를 함께 넘기는 경우에는 <b>부담부증여 탭</b>에서 계산하세요.':''}</div>
   `;
 }
 // 창업자금 증여세 과세특례 (조특법 §30의5): (한도 내 과세가액 − 5억) × 10%, 신고세액공제 배제
@@ -655,6 +693,7 @@ function renderGiftStartup(value){
   `;
 }
 attachComma('g_value', renderGift);
+['g_relation','g_report','g_skip','g_hire10','g_adj','g_85'].forEach(id=>document.getElementById(id).addEventListener('change', renderGift));
 ['g_relation','g_report','g_skip','g_hire10'].forEach(id=>document.getElementById(id).addEventListener('input', renderGift));
 document.getElementById('g_relation').addEventListener('change', renderGift);
 document.getElementById('g_report').addEventListener('change', renderGift);
