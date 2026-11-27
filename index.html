@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- taxcal v1.3 (2026-11-27) — 개인vs법인: 유보금 전액 배당 시나리오(분리/종합과세·비교과세·Gross-up 10%·배당세액공제) + 보수외소득 2천만 초과 건보료 / v1.2 (2026-10-30) — 증여세 탭: 재산 유형(현금/주택/상가) 선택 시 취득세 합산 총 부담 표시 / v1.1 부담부증여 주택·상가 구분 -->
+<!-- taxcal v1.4 (2026-11-27) — 개인vs법인 C열: 배당 종합과세를 종소세 확정신고로 표시(원천징수 기납부·5월 추가납부) / v1.3 개인vs법인: 유보금 전액 배당 시나리오(분리/종합과세·비교과세·Gross-up 10%·배당세액공제) + 보수외소득 2천만 초과 건보료 / v1.2 (2026-10-30) — 증여세 탭: 재산 유형(현금/주택/상가) 선택 시 취득세 합산 총 부담 표시 / v1.1 부담부증여 주택·상가 구분 -->
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
@@ -1288,7 +1288,7 @@ function renderCompare(){
     cTaxRows = `<tr class="sub"><td>배당 과세방식</td>${dash}${dash}<td>2천만 이하 분리과세<br>14% + 지방 1.4% = 15.4%</td></tr>`;
   } else {
     const cBr = brInfo(dv.T, INCOME_BRACKETS);
-    cTaxCell = `${won(dv.total)}<br><span style="font-size:10.5px;">근로+배당 종합과세</span>`;
+    cTaxCell = `${won(dv.total)}<br><span style="font-size:10.5px;">종합소득세 (근로+배당 합산)</span>`;
     cTaxRows = `
       <tr class="sub"><td>배당 과세방식</td>${dash}${dash}<td><b>2천만 초과 → 종합과세</b><br>근로소득과 합산</td></tr>
       <tr class="sub"><td>배당가산액 (Gross-up 10%)</td>${dash}${dash}<td>+${won(dv.G)}<br><span style="font-size:10.5px;">(배당 − 2천만) × 10%</span></td></tr>
@@ -1297,7 +1297,10 @@ function renderCompare(){
       <tr class="sub"><td>② 비교산출 (§62 2호)</td>${dash}${dash}<td>${won(dv.cmpTax)}<br><span style="font-size:10.5px;">배당×14% + 근로분 기본세율</span></td></tr>
       <tr class="sub"><td>산출세액 = max(①,②)</td>${dash}${dash}<td>${won(dv.calc)} · 한계 ${(cBr.rate*100)}%</td></tr>
       <tr class="sub"><td>배당세액공제 (§56)</td>${dash}${dash}<td>−${won(dv.divCredit)}<br><span style="font-size:10.5px;">min(가산액, 산출−비교산출)</span></td></tr>
-      <tr class="sub"><td>근로소득세액공제 (안분)</td>${dash}${dash}<td>−${won(dv.earnCredit)}</td></tr>`;
+      <tr class="sub"><td>근로소득세액공제 (안분)</td>${dash}${dash}<td>−${won(dv.earnCredit)}</td></tr>
+      <tr class="sub"><td>종소세 결정세액 (국세)</td>${dash}${dash}<td>${won(dv.national)}</td></tr>
+      <tr class="sub"><td>기납부: 연말정산 + 배당 원천 14%</td>${dash}${dash}<td>−${won(dv.sal.national)} − ${won(div*0.14)}</td></tr>
+      <tr class="sub"><td><b>5월 종소세 추가납부 (+지방)</b></td>${dash}${dash}<td><b>${won(Math.max(dv.national - dv.sal.national - div*0.14,0)*1.1)}</b></td></tr>`;
   }
 
   document.getElementById('x_result').innerHTML = `
@@ -1316,7 +1319,7 @@ function renderCompare(){
       <tr><td>법인세+지방 ${rental?'<br>(임대법인 20%~)':''}</td>${dash}<td>${won(corpTax)}</td><td>${won(corpTax)}</td></tr>
       <tr><td>법인 세후 이익 → 배당</td>${dash}<td class="dim">배당 없음</td><td>${won(div)}</td></tr>
       ${cTaxRows}
-      <tr><td>대표 개인소득세+지방</td>${dash}<td>${won(sal.total)}<br><span style="font-size:10.5px;">근로소득세</span></td><td>${cTaxCell}</td></tr>
+      <tr><td>대표 소득세+지방<br><span style="font-size:10.5px;font-weight:400;">C: 배당 2천만 초과 시 종소세</span></td>${dash}<td>${won(sal.total)}<br><span style="font-size:10.5px;">근로소득세</span></td><td>${cTaxCell}</td></tr>
       <tr><td>건강보험료+장기요양 (보수분)</td><td>${won(soloHI)} <b style="color:var(--warn)">이상</b><br><span style="font-size:10.5px;">지역 — 소득분만, 재산·자동차분 확인 불가</span></td><td>${won(ceoHI)}<br><span style="font-size:10.5px;">직장 — 보수 × 7.19% × 1.1314</span></td><td>${won(ceoHI)}</td></tr>
       <tr><td>보수외소득 건보료 (배당 2천만 초과분)</td>${dash}${dash}<td>${divHI>0?`${won(divHI)}<br><span style="font-size:10.5px;">(${wonShort(div)} − 2천만) × 7.19% × 1.1314</span>`:`0원<br><span style="font-size:10.5px;">보수외소득 2천만 이하</span>`}</td></tr>
       <tr class="total"><td>총 부담</td><td${w(soloTotal)}>${won(soloTotal)} 이상</td><td${w(bTotal)}>${won(bTotal)}</td><td${w(cTotal)}>${won(cTotal)}</td></tr>
